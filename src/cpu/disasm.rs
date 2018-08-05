@@ -1,6 +1,6 @@
 //! Instruction disassembler and pretty printer.
 
-use cpu::instr::{Instr, Operand, ConditionCode, AluOp, ShiftOp, OpSize};
+use cpu::instr::*;
 
 /// Trait for assembly printing contexts.
 ///
@@ -138,54 +138,6 @@ impl<P: Printer> PrinterExt for P {
 
         match op {
             Operand::Reg(reg) => self.print_register(reg.name()),
-            Operand::Disp { reg, disp, size: _ } => {
-                if ambig_size {
-                    print_size(self);
-                }
-
-                if *disp == 0 {
-                    self.with_indirect(|p| p.print_register(reg.name()));
-                } else {
-                    self.with_indirect(|p| {
-                        p.print_register(reg.name());
-                        if *disp != 0 {
-                            p.print_symbols(if *disp > 0 { "+" } else { "-" });
-                            p.print_addr_or_offset(&format!("{:#x}", disp.abs()));
-                        }
-                    });
-                }
-            }
-            Operand::Sib { scale, index, base, disp, size: _ } => {
-                if ambig_size {
-                    print_size(self);
-                }
-
-                self.with_indirect(|p| {
-                    if let Some(base) = base {
-                        p.print_register(base.name());
-                        p.print_symbols("+");
-                    }
-
-                    p.print_register(index.name());
-                    if *scale > 1 {
-                        p.print_symbols("*");
-                        p.print_addr_or_offset(&scale.to_string());
-                    }
-                    if *disp != 0 {
-                        p.print_symbols(if *disp > 0 { "+" } else { "-" });
-                        p.print_addr_or_offset(&format!("{:#x}", disp.abs()));
-                    }
-                });
-            }
-            Operand::Abs32 { addr, size: _ } => {
-                if ambig_size {
-                    print_size(self);
-                }
-
-                self.with_indirect(|p| {
-                    p.print_addr_or_offset(&format!("{:#x}", addr));
-                });
-            }
             Operand::Imm(imm) => {
                 if ambig_size {
                     // FIXME: Print immediates with 0-padding to avoid having to disambiguate
@@ -197,6 +149,49 @@ impl<P: Printer> PrinterExt for P {
                     ImmReprHint::Hex => format!("{:#x}", imm),
                 };
                 self.print_immediate(&s);
+            }
+            Operand::Mem(mem) => {
+                match mem.addressing {
+                    Addressing::Disp { base, disp } => {
+                        if ambig_size {
+                            print_size(self);
+                        }
+
+                        self.with_indirect(|p| {
+                            if let Some(base) = base {
+                                p.print_register(base.name());
+                                if disp != 0 {
+                                    p.print_symbols(if disp > 0 { "+" } else { "-" });
+                                    p.print_addr_or_offset(&format!("{:#x}", disp.abs()));
+                                }
+                            } else {
+                                p.print_addr_or_offset(&format!("{:#x}", disp));
+                            }
+                        });
+                    }
+                    Addressing::Sib { scale, index, base, disp } => {
+                        if ambig_size {
+                            print_size(self);
+                        }
+
+                        self.with_indirect(|p| {
+                            if let Some(base) = base {
+                                p.print_register(base.name());
+                                p.print_symbols("+");
+                            }
+
+                            p.print_register(index.name());
+                            if scale > 1 {
+                                p.print_symbols("*");
+                                p.print_addr_or_offset(&scale.to_string());
+                            }
+                            if disp != 0 {
+                                p.print_symbols(if disp > 0 { "+" } else { "-" });
+                                p.print_addr_or_offset(&format!("{:#x}", disp.abs()));
+                            }
+                        });
+                    }
+                }
             }
         }
     }

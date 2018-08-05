@@ -220,69 +220,19 @@ pub enum Operand {
     /// The operand is the value inside a register, or the register itself.
     Reg(Register),
 
-    /// Register-indirect addressing with optional displacement.
-    ///
-    /// The operand is in memory, at the address specified by the sum of the
-    /// value stored in `reg` and the address displacement `disp`.
-    ///
-    /// x86 has support for 32-bit displacement, 8-bit displacement, and no
-    /// displacement at all (the latter saving instruction size). All of these
-    /// are collapsed into `Disp` when decoded.
-    Disp {
-        /// Size of the operand in memory.
-        size: OpSize,
-        /// 32-bit base register.
-        reg: Register,
-        disp: i32,
-    },
-
-    /// "Displacement-only" addressing.
-    ///
-    /// The operand is in memory, at the absolute address `addr`.
-    Abs32 {
-        /// Size of the operand in memory.
-        size: OpSize,
-        addr: u32,
-    },
-
-    /// Scale Index Base.
-    ///
-    /// The operand is in memory and its address is computed using the following
-    /// formula:
-    ///
-    /// `base + index * scale + disp`
-    ///
-    /// Where `base` and `index` represent the value stored inside the `base`
-    /// and `index` registers, respectively.
-    Sib {
-        /// Size of the operand in memory.
-        size: OpSize,
-        /// The scale value multiplied with the value of the `index` register.
-        ///
-        /// 1, 2, 4, or 8.
-        scale: u8,
-        index: Register,
-        /// Base offset register.
-        ///
-        /// Might be `None` if Mod=00 and Base=101, which is "displacement-only"
-        /// SIB mode.
-        base: Option<Register>,
-        /// Fixed displacement.
-        disp: i32,
-    },
-
     /// Immediate value.
     Imm(Immediate),
+
+    /// The operand is stored in memory.
+    Mem(MemoryLocation),
 }
 
 impl Operand {
     pub fn size(&self) -> OpSize {
         match self {
             Operand::Reg(reg) => reg.size(),
-            Operand::Disp { size, .. } |
-            Operand::Abs32 { size, .. } |
-            Operand::Sib { size, .. } => *size,
             Operand::Imm(imm) => imm.size(),
+            Operand::Mem(mem) => mem.size,
         }
     }
 }
@@ -299,7 +249,111 @@ impl From<Immediate> for Operand {
     }
 }
 
-/// Operand sizes (in 32-bit mode).
+impl From<MemoryLocation> for Operand {
+    fn from(mem: MemoryLocation) -> Self {
+        Operand::Mem(mem)
+    }
+}
+
+/// A location in virtual (possibly segmented) memory.
+///
+/// This represents all addressing modes except register-direct and immediate
+/// addressing, which aren't really addressing modes but other kinds of
+/// operands.
+#[derive(Debug, PartialEq, Eq)]
+pub struct MemoryLocation {
+    /// The operand's size. Since we only store an address, we wouldn't know
+    /// this if we didn't store it.
+    pub size: OpSize,
+    /// The base segment of the operation. In almost all cases, this is the
+    /// default segment of the instruction. In rare cases this is overridden
+    /// with `FS` to access the Thread Information Block.
+    ///
+    /// Note that handling of segments, particularly default segments, is broken
+    /// in the decoder. This shouldn't be an issue in practice, since segments
+    /// are only used to access thread-local information via the TIB.
+    pub base_segment: Segment,
+    /// The addressing mode used to calculate the memory address.
+    pub addressing: Addressing,
+}
+
+/// An x86 segment or segment register.
+///
+/// Note that Windows NT (luckily) uses a flat memory space, which effectively
+/// disables segmentation. The only use of the segment registers is thread-local
+/// information, which drastically reduces the amount of segmentation we have to
+/// emulate.
+///
+/// For that reason, handling of segments might be buggy or broken in the
+/// decoder and elsewhere.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Segment {
+    Cs,
+    Ds,
+    Es,
+    /// Used by Windows NT for the [TIB].
+    ///
+    /// [TIB]: https://en.wikipedia.org/wiki/Win32_Thread_Information_Block
+    Fs,
+    Gs,
+    Ss,
+}
+
+/// Addressing modes for operands in memory.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Addressing {
+    /// Register-indirect addressing with optional displacement.
+    ///
+    /// The operand is in memory, at the address specified by the sum of the
+    /// value stored in the `base` register and the address displacement `disp`.
+    ///
+    /// x86 has support for 32-bit displacement, 8-bit displacement, and no
+    /// displacement at all (the latter saving instruction size). All of these
+    /// are collapsed into `Disp` when decoded. It is also possible to use a
+    /// "displacement-only" mode without a base register, which is also
+    /// represented as this variant.
+    Disp {
+        /// 32-bit base register. Might be `None` if "displacement-only"
+        /// addressing is used.
+        base: Option<Register>,
+        /// Fixed displacement added to the base register contents.
+        disp: i32,
+    },
+
+    /// Address calculation using a Scale Index Byte.
+    ///
+    /// The address is computed using the following formula:
+    ///
+    /// `base + index * scale + disp`
+    ///
+    /// Where `base` and `index` represent the value stored inside the `base`
+    /// and `index` registers, respectively.
+    Sib {
+        /// The scale value multiplied with the value of the `index` register.
+        ///
+        /// 1, 2, 4, or 8.
+        scale: u8,
+        index: Register,
+        /// Base offset register.
+        ///
+        /// Might be `None` if `Mod=00` and `Base=101`, which is
+        /// "displacement-only" SIB mode.
+        base: Option<Register>,
+        /// Fixed displacement.
+        disp: i32,
+    },
+}
+
+impl Addressing {
+    pub fn absolute(virt_addr: u32) -> Self {
+        Addressing::Disp {
+            base: None,
+            disp: virt_addr as i32,
+        }
+    }
+}
+
+/// Operand or operation size (in 32-bit mode).
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum OpSize {
     Bits8,

@@ -1,6 +1,6 @@
 //! x86 instruction decoder.
 
-use cpu::instr::{Instr, AluOp, ShiftOp, Register, Operand, ConditionCode, OpSize, Immediate};
+use cpu::instr::*;
 use cpu::prefix::RawPrefixes;
 use memory::{VirtualMemory, MemoryError};
 
@@ -90,7 +90,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                     OpSize::Bits16 => Register::Ax,
                     OpSize::Bits32 => Register::Eax,
                 }.into();
-                let src = Operand::Imm(self.read_immediate(size)?);
+                let src = self.read_immediate(size)?.into();
 
                 Instr::Alu { op: alu_op, dest, src }
             }
@@ -105,12 +105,12 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 let op = AluOp::from_u8(modrm.reg_raw())
                     .expect("couldn't determine ALU op");
                 let dest = self.read_addressing(modrm, size)?;
-                let src = Operand::Imm(if sign_ext_imm {
+                let src = if sign_ext_imm {
                     // 8-bit immediate sign-extended to `size`
-                    Immediate::from(self.read()?).sign_ext_to(size)
+                    Immediate::from(self.read()?).sign_ext_to(size).into()
                 } else {
-                    self.read_immediate(size)?
-                });
+                    self.read_immediate(size)?.into()
+                };
 
                 Instr::Alu { op, dest, src }
             }
@@ -138,12 +138,13 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 Instr::Mov { dest, src }
             }
             _ if bitpat!(1 0 1 0 0 0 _ _)(byte) => {
-                // mov between ax/eax and memory offset
+                // mov between al/ax/eax and abs. memory address
                 let size = prefixes.size(default_size_bit)?;
-                let rm = Operand::Abs32 {
+                let rm = MemoryLocation {
                     size,
-                    addr: self.read_i32()? as u32,
-                };
+                    base_segment: Segment::Ds,
+                    addressing: Addressing::absolute(self.read_i32()? as u32),
+                }.into();
                 let reg = match size {
                     OpSize::Bits8 => Register::Al,
                     OpSize::Bits16 => Register::Ax,
@@ -167,7 +168,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 let cc = ConditionCode::from_u8(byte & 0x0F)
                     .expect("can't get condition code from 4-bit encoding");
                 let offset = self.read()? as i8;
-                let target = Operand::Imm(Immediate::Imm32(self.pos.wrapping_add(offset as u32) as i32));
+                let target = Immediate::Imm32(self.pos.wrapping_add(offset as u32) as i32).into();
 
                 Instr::JumpIf { cc, target }
             }
@@ -189,7 +190,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 // size bit inverted and in different position
                 let smol = byte & 0b10 != 0;
                 let size = prefixes.size(!smol)?;
-                let imm = Operand::Imm(self.read_immediate(size)?);
+                let imm = self.read_immediate(size)?.into();
 
                 Instr::Push { operand: imm }
             }
@@ -235,10 +236,10 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                     // 0xD_
                     if byte & 0b10 == 0 {
                         // 0xD0/D1 - constant 1
-                        src = Operand::Imm(Immediate::Imm8(1))
+                        src = Immediate::Imm8(1).into();
                     } else {
                         // 0xD2/D3 - CL register
-                        src = Operand::Reg(Register::Cl);
+                        src = Register::Cl.into();
                     }
                 }
 
@@ -253,7 +254,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 // EIP after the call instr.
                 let eip = self.pos;
-                let target = Operand::Imm(Immediate::Imm32(eip.wrapping_add(offset as u32) as i32));
+                let target = Immediate::Imm32(eip.wrapping_add(offset as u32) as i32).into();
 
                 Instr::Call { target }
             }
@@ -381,34 +382,42 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
         // use Mod and R/M fields to determine addressing mode
         let mode = modrm.addressing_mode();
         if mode == Register {
-            return Ok(Operand::Reg(modrm.rm_as_reg(size)));
+            return Ok(modrm.rm_as_reg(size).into());
         }
 
         if mode == RegIndirect && modrm.rm_raw() == 0b101 {
-            return Ok(Operand::Abs32 {      // displacement-only addressing
+            // displacement-only mode
+            return Ok(MemoryLocation {
                 size,
-                addr: self.read_i32()? as u32,
-            });
+                base_segment: Segment::Ds,  // wrong
+                addressing: Addressing::absolute(self.read_i32()? as u32),
+            }.into());
         }
 
         if modrm.rm_raw() == 0b100 {
             // SIB
             let sib = Sib::decode(self.read()?, mode)?;
-            return Ok(Operand::Sib {
+            return Ok(MemoryLocation {
                 size,
-                scale: sib.scale_val,
-                index: sib.index,
-                base: sib.base,
-                disp: self.read_disp(mode)?,
-            });
+                base_segment: Segment::Ds,  // wrong
+                addressing: Addressing::Sib {
+                    scale: sib.scale_val,
+                    index: sib.index,
+                    base: sib.base,
+                    disp: self.read_disp(mode)?,
+                },
+            }.into());
         }
 
         // Register-indirect addressing with optional displacement
-        Ok(Operand::Disp {
+        Ok(MemoryLocation {
             size,
-            reg: modrm.rm_as_reg(OpSize::Bits32),
-            disp: self.read_disp(mode)?,
-        })
+            base_segment: Segment::Ds,  // wrong
+            addressing: Addressing::Disp {
+                base: Some(modrm.rm_as_reg(OpSize::Bits32)),
+                disp: self.read_disp(mode)?,
+            },
+        }.into())
     }
 
     /// Read a displacement
