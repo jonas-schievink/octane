@@ -180,7 +180,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 if pop {
                     Instr::Pop { reg }
                 } else {
-                    Instr::Push { value: reg.into() }
+                    Instr::Push { operand: reg.into() }
                 }
             }
             _ if bitpat!(0 1 1 0 1 0 _ 0)(byte) => {  // 0x68 / 0x6A
@@ -191,7 +191,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 let size = prefixes.size(!smol)?;
                 let imm = Operand::Imm(self.read_immediate(size)?);
 
-                Instr::Push { value: imm }
+                Instr::Push { operand: imm }
             }
             _ if bitpat!(1 1 1 1 0 1 1 _)(byte) => {  // 0xF6 / 0xF7
                 // test/not/neg/mul/imul/div/idiv
@@ -321,8 +321,12 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 match modrm.reg_raw() {
                     0 => Instr::Inc { operand },
                     1 => Instr::Dec { operand },
-                    //2 => Instr::Call {}
-                    _ => unimplemented!()
+                    2 => Instr::Call { target: operand },
+                    3 => unimplemented!("far call"),
+                    4 => Instr::Jump { target: operand },
+                    5 => unimplemented!("far jump"),
+                    6 => Instr::Push { operand },
+                    _ => unreachable!(),
                 }
             }
             0x0F => {

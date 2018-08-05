@@ -54,6 +54,11 @@ pub enum Instr {
         target: Operand,
     },
 
+    /// Unconditional jump.
+    Jump {
+        target: Operand,
+    },
+
     /// Call a procedure.
     ///
     /// Pushes `EIP` (after the `call` instruction) onto the stack, decrements
@@ -87,7 +92,7 @@ pub enum Instr {
     ///
     /// Does not read or modify any flags.
     Push {
-        value: Operand,
+        operand: Operand,
     },
 
     /// Pop a 16- or 32-bit value from the stack into a register.

@@ -267,6 +267,10 @@ impl<P: Printer> PrinterExt for P {
                 self.space();
                 self.print_jump_target_operand(target, true);
             }
+            Jump { target } => {
+                self.space();
+                self.print_jump_target_operand(target, true);
+            }
             Call { target } => {
                 self.space();
                 self.print_jump_target_operand(target, false);
@@ -277,9 +281,9 @@ impl<P: Printer> PrinterExt for P {
                     self.print_immediate(&format!("{:}", pop));
                 }
             }
-            Push { value } => {
+            Push { operand } => {
                 self.space();
-                self.print_operand(value, ImmReprHint::Hex, true);
+                self.print_operand(operand, ImmReprHint::Hex, true);
             }
             Pop { reg } => {
                 self.space();
@@ -362,6 +366,7 @@ fn mnemonic(instr: &Instr) -> String {
         }
         Mov { .. } => "mov",
         JumpIf { .. } => "j",
+        Jump { .. } => "jmp",
         Call { .. } => "call",
         Ret { .. } => "ret",
         Push { .. } => "push",
