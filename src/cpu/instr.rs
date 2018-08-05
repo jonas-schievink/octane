@@ -44,20 +44,23 @@ pub enum Instr {
         src: Operand,
     },
 
-    /// Set `EIP = EIP + offset` if the flag specified by `cc` is set to 1.
+    /// Branch if the flag specified by `cc` is set to 1.
+    ///
+    /// If the status flags `cc` is 1, this sets `EIP = target`.
     ///
     /// Reads the flag specified by `cc`. Does not modify any flags.
     JumpIf {
         cc: ConditionCode,
-        offset: i8,
+        target: Operand,
     },
 
-    /// Call a procedure at an `EIP`-relative offset.
+    /// Call a procedure.
     ///
     /// Pushes `EIP` (after the `call` instruction) onto the stack, decrements
-    /// `ESP` by 4, then sets `EIP = EIP + offset`.
+    /// `ESP` by 4, then sets `EIP = target`.
     Call {
-        offset: i32,
+        /// Target address. Might be stored in register or memory.
+        target: Operand,
     },
 
     /// Near return to caller.

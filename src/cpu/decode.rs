@@ -167,8 +167,9 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 let cc = ConditionCode::from_u8(byte & 0x0F)
                     .expect("can't get condition code from 4-bit encoding");
                 let offset = self.read()? as i8;
+                let target = Operand::Imm(Immediate::Imm32(self.pos.wrapping_add(offset as u32) as i32));
 
-                Instr::JumpIf { cc, offset }
+                Instr::JumpIf { cc, target }
             }
             _ if bitpat!(0 1 0 1 _ _ _ _)(byte) => {  // 0x5_
                 // push or pop 16- or 32-bit register
@@ -247,10 +248,14 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 Instr::Shift { op, dest, src }
             }
             0xE8 => {
-                // call
+                // call with eip-relative offset
                 let offset = self.read_i32()?;
 
-                Instr::Call { offset }
+                // EIP after the call instr.
+                let eip = self.pos;
+                let target = Operand::Imm(Immediate::Imm32(eip.wrapping_add(offset as u32) as i32));
+
+                Instr::Call { target }
             }
             _ if bitpat!(1 1 0 0 0 0 1 _)(byte) => {
                 // ret
@@ -650,7 +655,7 @@ mod tests {
         decodes_as("8D 44 08 0F", "lea eax,[eax+ecx+0xf]");
         decodes_as("8D 44 08 FE", "lea eax,[eax+ecx-0x2]");
         decodes_as("F7 F9", "idiv ecx");
-        decodes_as("73 02", "jnc +2");
+        decodes_as("73 02", "jnc 0x00000004");  // without context, we only get the abs. target addr
         decodes_as("99", "cdq");
         decodes_as("66 99", "cwd");
         decodes_as("33 F6", "xor esi,esi");

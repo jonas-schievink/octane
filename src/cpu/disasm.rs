@@ -76,6 +76,7 @@ trait PrinterExt {
     fn with_indirect<F>(&mut self, f: F)
         where F: FnOnce(&mut Self);
     fn print_operand(&mut self, op: &Operand, hint: ImmReprHint, ambig_size: bool);
+    fn print_jump_target_operand(&mut self, target: &Operand, is_branch: bool);
     fn print_instr(&mut self, instr: &Instr);
 }
 
@@ -195,8 +196,34 @@ impl<P: Printer> PrinterExt for P {
                     ImmReprHint::Dec => format!("{}", imm),
                     ImmReprHint::Hex => format!("{:#x}", imm),
                 };
-                self.print_immediate(&s)
+                self.print_immediate(&s);
             }
+        }
+    }
+
+    /// Prints the target of a jump or call.
+    ///
+    /// # Parameters
+    ///
+    /// * `target`: Operand evaluating to the target address.
+    /// * `is_branch`: Whether this is likely an intra-procedural branch.
+    ///   Changes printing to include the EIP-relative offset, which might be
+    ///   more readable in some cases.
+    fn print_jump_target_operand(&mut self, target: &Operand, is_branch: bool) {
+        if let Operand::Imm(imm) = target {
+            // Absolute target address
+            let target = imm.zero_extended();
+            if is_branch && self.pc_ref().is_some() {
+                let rel = target.wrapping_sub(self.pc_ref().unwrap()) as i32;
+                self.print_jump_target(&format!("{:+}", rel));
+                self.print_symbols(" (-> ");
+                self.print_jump_target(&format!("{:#010X}", target));
+                self.print_symbols(")");
+            } else {
+                self.print_jump_target(&format!("{:#010X}", target));
+            }
+        } else {
+            self.print_operand(target, ImmReprHint::Hex, true);
         }
     }
 
@@ -236,18 +263,13 @@ impl<P: Printer> PrinterExt for P {
                 self.print_symbols(",");
                 self.print_operand(src, ImmReprHint::Hex, false);
             }
-            JumpIf { cc: _, offset } => {
+            JumpIf { cc: _, target } => {
                 self.space();
-                self.print_jump_target(&format!("{:+}", offset));
+                self.print_jump_target_operand(target, true);
             }
-            Call { offset } => {
+            Call { target } => {
                 self.space();
-                // calls are most useful when their target is an absolute addr.
-                if let Some(abs) = self.resolve_target(*offset) {
-                    self.print_jump_target(&format!("{:#010X}", abs));
-                } else {
-                    self.print_jump_target(&format!("{:+}", offset));
-                }
+                self.print_jump_target_operand(target, false);
             }
             Ret { pop } => {
                 if *pop > 0 {
