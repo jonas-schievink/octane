@@ -255,7 +255,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 Instr::Shift { op, dest, src }
             }
             0xE8 => {
-                // call with eip-relative offset
+                // call with eip-relative offset (FIXME can be 16-bit)
                 let offset = self.read_i32()?;
 
                 // EIP after the call instr.
@@ -263,6 +263,26 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 let target = Immediate::Imm32(eip.wrapping_add(offset as u32) as i32).into();
 
                 Instr::Call { target }
+            }
+            0xE9 => {
+                // jmp with eip-relative offset (FIXME can be 16-bit)
+                let offset = self.read_i32()?;
+
+                // EIP after the instr.
+                let eip = self.pos;
+                let target = Immediate::Imm32(eip.wrapping_add(offset as u32) as i32).into();
+
+                Instr::Jump { target }
+            }
+            0xEB => {
+                // unconditional jump with 8-bit relative offset
+                let offset = self.read()? as i8;
+
+                // EIP after the instr.
+                let eip = self.pos;
+                let target = Immediate::Imm32(eip.wrapping_add(offset as u32) as i32).into();
+
+                Instr::Jump { target }
             }
             _ if bitpat!(1 1 0 0 0 0 1 _)(byte) => {
                 // ret
