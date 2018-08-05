@@ -288,7 +288,7 @@ impl<P: Printer> PrinterExt for P {
                 self.space();
                 self.print_register(dest.name());
                 self.print_symbols(",");
-                self.print_operand(src, ImmReprHint::Hex, false);
+                self.print_operand(&Operand::Mem(src.clone()), ImmReprHint::Hex, false);
             }
             Test { lhs, rhs } => {
                 self.space();

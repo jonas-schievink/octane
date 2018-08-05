@@ -279,11 +279,12 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 };
                 let dest = modrm.reg(size);
                 let src = self.read_addressing(modrm, OpSize::Bits8 /* doesn't matter */)?;
-                if let Operand::Reg(_) = src {
-                    return Err(DecoderError::ud("use of register as source operand of `lea`"));
+                match src {
+                    Operand::Reg(_) | Operand::Imm(_) => {
+                        return Err(DecoderError::ud("use of `lea` with non-memory operand"));
+                    }
+                    Operand::Mem(src) => Instr::Lea { dest, src },
                 }
-
-                Instr::Lea { dest, src }
             }
             0x99 => {
                 // cwd/cdq

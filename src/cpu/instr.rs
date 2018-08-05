@@ -116,8 +116,8 @@ pub enum Instr {
         /// May be a 16-bit register, in which case the low 16-bit of the
         /// address are stored.
         dest: Register,
-        /// May not be a register operand (that's `#UD`).
-        src: Operand,
+        /// The memory location whose address to compute.
+        src: MemoryLocation,
     },
 
     /// Calculate the bitwise AND of `lhs` and `rhs` and set the flags
@@ -260,7 +260,7 @@ impl From<MemoryLocation> for Operand {
 /// This represents all addressing modes except register-direct and immediate
 /// addressing, which aren't really addressing modes but other kinds of
 /// operands.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct MemoryLocation {
     /// The operand's size. Since we only store an address, we wouldn't know
     /// this if we didn't store it.
@@ -286,7 +286,7 @@ pub struct MemoryLocation {
 ///
 /// For that reason, handling of segments might be buggy or broken in the
 /// decoder and elsewhere.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Segment {
     Cs,
     Ds,
@@ -300,7 +300,7 @@ pub enum Segment {
 }
 
 /// Addressing modes for operands in memory.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Addressing {
     /// Register-indirect addressing with optional displacement.
     ///
