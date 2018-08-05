@@ -1,7 +1,7 @@
 //! x86 instruction decoder.
 
 use cpu::instr::*;
-use cpu::prefix::RawPrefixes;
+use cpu::prefix::{Prefixes, PrefixFlags};
 use memory::{VirtualMemory, MemoryError};
 
 use num_traits::FromPrimitive;
@@ -13,6 +13,7 @@ pub struct Decoder<'a, M: VirtualMemory + 'a> {
     pos: u32,
     /// Length of the currently decoded instruction.
     len: u32,
+    prefixes: Prefixes,
     mem: &'a M,
 }
 
@@ -27,6 +28,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
         Self {
             pos: pc,
             len: 0,
+            prefixes: Prefixes::empty(),
             mem,
         }
     }
@@ -46,12 +48,13 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
     /// further instruction decoding.
     pub fn decode_next(&mut self) -> Result<Instr, DecoderError> {
         self.len = 0;
-        let mut prefixes = RawPrefixes::empty();
+        self.prefixes = Prefixes::empty();
+
         let mut byte = self.read()?;
 
         // Collect prefix bytes
         loop {
-            prefixes = match prefixes.decode(byte) {
+            match self.prefixes.decode(byte) {
                 Ok(new) => new,
                 Err(_) => break,
             };
@@ -68,7 +71,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 // "Normal" ALU opcode with Mod-Reg-R/M byte
                 let alu_op = AluOp::from_u8((byte & 0b00111000) >> 3)
                     .expect("couldn't turn 3-bit u8 into AluOp");
-                let size = prefixes.size(default_size_bit)?;
+                let size = self.prefixes.size(default_size_bit)?;
                 let modrm = self.read_modrm()?;
                 let reg = modrm.reg(size).into();
                 let rm = self.read_addressing(modrm, size)?;
@@ -84,7 +87,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 // ALU op with immediate and eax/ax
                 let alu_op = AluOp::from_u8((byte & 0b00111000) >> 3)
                     .expect("couldn't turn 3-bit u8 into AluOp");
-                let size = prefixes.size(default_size_bit)?;
+                let size = self.prefixes.size(default_size_bit)?;
                 let dest = match size {
                     OpSize::Bits8 => Register::Al,
                     OpSize::Bits16 => Register::Ax,
@@ -100,7 +103,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 // direction can't be changed here, so it encodes something else:
                 // 0=imm. same size as operand, 1=imm. 8-bit sign-extended to op
                 let sign_ext_imm = default_dir_bit;
-                let size = prefixes.size(default_size_bit)?;
+                let size = self.prefixes.size(default_size_bit)?;
                 let modrm = self.read_modrm()?;
                 let op = AluOp::from_u8(modrm.reg_raw())
                     .expect("couldn't determine ALU op");
@@ -117,7 +120,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             _ if bitpat!(1 0 1 1 _ _ _ _)(byte) => {  // 0xB_
                 // 0xB_ = load immediate to register
                 let size = byte & 0b0000_1000 != 0;
-                let size = prefixes.size(size)?;
+                let size = self.prefixes.size(size)?;
                 let dest = ModRegRm::conv_reg(byte & 0b111, size).into();
                 let src = self.read_immediate(size)?.into();
 
@@ -125,7 +128,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             }
             _ if bitpat!(1 0 0 0 1 0 _ _)(byte) => {
                 // mov reg/mem <-> GP reg (basically, load/store)
-                let size = prefixes.size(default_size_bit)?;
+                let size = self.prefixes.size(default_size_bit)?;
                 let modrm = self.read_modrm()?;
                 let reg = modrm.reg(size).into();
                 let rm = self.read_addressing(modrm, size)?;
@@ -139,10 +142,10 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             }
             _ if bitpat!(1 0 1 0 0 0 _ _)(byte) => {
                 // mov between al/ax/eax and abs. memory address
-                let size = prefixes.size(default_size_bit)?;
+                let size = self.prefixes.size(default_size_bit)?;
                 let rm = MemoryLocation {
                     size,
-                    base_segment: Segment::Ds,
+                    base_segment: self.prefixes.segment(Segment::Ds),
                     addressing: Addressing::absolute(self.read_i32()? as u32),
                 }.into();
                 let reg = match size {
@@ -163,7 +166,10 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 // conditional jumps
 
                 // get rid of branch hint prefixes
-                prefixes.remove(RawPrefixes::OVERRIDE_CS | RawPrefixes::OVERRIDE_DS);
+                match self.prefixes.segment(Segment::Cs) {
+                    Segment::Cs | Segment::Ds => {},
+                    _ => return Err(DecoderError::ud("invalid prefix for conditional jump")),
+                }
 
                 let cc = ConditionCode::from_u8(byte & 0x0F)
                     .expect("can't get condition code from 4-bit encoding");
@@ -175,7 +181,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             _ if bitpat!(0 1 0 1 _ _ _ _)(byte) => {  // 0x5_
                 // push or pop 16- or 32-bit register
                 let pop = byte & 0b0000_1000 != 0;
-                let size = prefixes.size(true)?; // default 32-bit
+                let size = self.prefixes.size(true)?; // default 32-bit
                 let reg = ModRegRm::conv_reg(byte & 0b111, size);
 
                 if pop {
@@ -189,7 +195,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 // size bit inverted and in different position
                 let smol = byte & 0b10 != 0;
-                let size = prefixes.size(!smol)?;
+                let size = self.prefixes.size(!smol)?;
                 let imm = self.read_immediate(size)?.into();
 
                 Instr::Push { operand: imm }
@@ -197,7 +203,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             _ if bitpat!(1 1 1 1 0 1 1 _)(byte) => {  // 0xF6 / 0xF7
                 // test/not/neg/mul/imul/div/idiv
                 // operand is R/M part of modrm, while `Reg` is the opcode extension
-                let size = prefixes.size(default_size_bit)?;
+                let size = self.prefixes.size(default_size_bit)?;
                 let modrm = self.read_modrm()?;
                 let operand = self.read_addressing(modrm, size)?;
 
@@ -215,7 +221,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             }
             _ if bitpat!(1 0 0 0 0 1 0 _)(byte) => {  // 0x84 / 0x85
                 // test
-                let size = prefixes.size(default_size_bit)?;
+                let size = self.prefixes.size(default_size_bit)?;
                 let modrm = self.read_modrm()?;
                 let lhs = self.read_addressing(modrm, size)?;
                 let rhs = modrm.reg(size).into();
@@ -224,7 +230,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             }
             _ if bitpat!(1 1 0 0 0 0 0 _)(byte) || bitpat!(1 1 0 1 0 0 _ _)(byte) => {    // C0 / C1 / D0-D3
                 // shift group 2
-                let size = prefixes.size(default_size_bit)?;
+                let size = self.prefixes.size(default_size_bit)?;
                 let modrm = self.read_modrm()?;
                 let dest = self.read_addressing(modrm, size)?;
 
@@ -272,7 +278,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             0x8D => {
                 // lea
                 let modrm = self.read_modrm()?;
-                let size = if prefixes.take(RawPrefixes::OVERRIDE_OPERAND) {
+                let size = if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
                     OpSize::Bits16
                 } else {
                     OpSize::Bits32
@@ -288,7 +294,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             }
             0x99 => {
                 // cwd/cdq
-                if prefixes.take(RawPrefixes::OVERRIDE_OPERAND) {
+                if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
                     // 16-bit
                     Instr::Cwd
                 } else {
@@ -298,7 +304,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             }
             0x6B => {
                 // 3-operand imul with 8-bit immediate
-                let size = if prefixes.take(RawPrefixes::OVERRIDE_OPERAND) {
+                let size = if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
                     OpSize::Bits16
                 } else {
                     OpSize::Bits32
@@ -312,7 +318,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             }
             0xFF => {
                 // Inc/Dec/Push group 4
-                let size = if prefixes.take(RawPrefixes::OVERRIDE_OPERAND) {
+                let size = if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
                     OpSize::Bits16
                 } else {
                     OpSize::Bits32
@@ -328,23 +334,53 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                     4 => Instr::Jump { target: operand },
                     5 => unimplemented!("far jump"),
                     6 => Instr::Push { operand },
+                    7 => return Err(DecoderError::ud("0xFF group with opcode 7")),
                     _ => unreachable!(),
                 }
             }
-            0x0F => {
-                unimplemented!("0x0F expansion opcodes");
-            }
+            0x0F => self.decode_0f()?,
             _ => unimplemented!("opcode {:#04X}", byte),
         };
 
-        if !prefixes.is_empty() {
+        if !self.prefixes.is_empty() {
             // Unconsumed (assumed invalid) prefix bytes. When the decoder
             // processes a collected prefix byte, it removes it from `prefixes`.
             // By assuming that any unconsumed prefixes are #UD, we ensure that
             // we never decode instructions wrongly because we're ignoring a
             // prefix.
-            return Err(DecoderError::ud(format!("undecoded prefix bytes: {:?} (instruction: {})", prefixes, instr)));
+            return Err(DecoderError::ud(format!("undecoded prefix bytes: {:?} (instruction: {})", self.prefixes, instr)));
         }
+
+        Ok(instr)
+    }
+
+    /// Decodes a `0x0F` expansion opcode.
+    fn decode_0f(&mut self) -> Result<Instr, DecoderError> {
+        let byte = self.read()?;
+
+        // Many instrs look like this: X X X X X X D S
+        // Pull out D and S bits for convenience
+        let _default_dir_bit  = (byte & 0b10) >> 1 != 0; // false = Reg to R/M, true = R/M to Reg
+        let default_size_bit = (byte & 0b01) != 0;      // false = 8 bit, true = 16/32 bit
+
+        let instr = match byte {
+            0xB6 | 0xB7 => {
+                let src_size = if default_size_bit {
+                    OpSize::Bits16
+                } else {
+                    OpSize::Bits8
+                };
+                let dest_size = self.prefixes.size(default_size_bit)?;
+
+                let modrm = self.read_modrm()?;
+                let dest = modrm.reg(dest_size);
+                let src = self.read_addressing(modrm, src_size)?;
+                // FIXME: what if both src and dest are 16 bit?
+
+                Instr::MovZx { dest, src }
+            }
+            _ => unimplemented!("0x0F expansion opcode {:#04X}", byte),
+        };
 
         Ok(instr)
     }
@@ -380,6 +416,10 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
     fn read_addressing(&mut self, modrm: ModRegRm, size: OpSize) -> Result<Operand, DecoderError> {
         use self::AddressingMode::*;
 
+        // We always use `DS` as the default segment, which is wrong, but should
+        // suffice for this use case.
+        let base_segment = self.prefixes.segment(Segment::Ds);
+
         // use Mod and R/M fields to determine addressing mode
         let mode = modrm.addressing_mode();
         if mode == Register {
@@ -390,7 +430,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             // displacement-only mode
             return Ok(MemoryLocation {
                 size,
-                base_segment: Segment::Ds,  // wrong
+                base_segment,
                 addressing: Addressing::absolute(self.read_i32()? as u32),
             }.into());
         }
@@ -400,7 +440,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
             let sib = Sib::decode(self.read()?, mode)?;
             return Ok(MemoryLocation {
                 size,
-                base_segment: Segment::Ds,  // wrong
+                base_segment,
                 addressing: Addressing::Sib {
                     scale: sib.scale_val,
                     index: sib.index,
@@ -413,7 +453,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
         // Register-indirect addressing with optional displacement
         Ok(MemoryLocation {
             size,
-            base_segment: Segment::Ds,  // wrong
+            base_segment,
             addressing: Addressing::Disp {
                 base: Some(modrm.rm_as_reg(OpSize::Bits32)),
                 disp: self.read_disp(mode)?,

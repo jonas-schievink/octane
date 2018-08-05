@@ -44,6 +44,12 @@ pub enum Instr {
         src: Operand,
     },
 
+    /// Move with zero-extend. `src` may be smaller than `dest`.
+    MovZx {
+        dest: Register,
+        src: Operand,
+    },
+
     /// Branch if the flag specified by `cc` is set to 1.
     ///
     /// If the status flags `cc` is 1, this sets `EIP = target`.

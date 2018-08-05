@@ -75,6 +75,7 @@ trait PrinterExt {
     fn space(&mut self);
     fn with_indirect<F>(&mut self, f: F)
         where F: FnOnce(&mut Self);
+    fn print_segment(&mut self, segment: Segment);
     fn print_operand(&mut self, op: &Operand, hint: ImmReprHint, ambig_size: bool);
     fn print_jump_target_operand(&mut self, target: &Operand, is_branch: bool);
     fn print_instr(&mut self, instr: &Instr);
@@ -102,6 +103,20 @@ impl<P: Printer> PrinterExt for P {
         self.print_symbols("[");
         f(self);
         self.print_symbols("]");
+    }
+
+    fn print_segment(&mut self, segment: Segment) {
+        let name = match segment {
+            Segment::Cs => "cs",
+            Segment::Ds => "ds",
+            Segment::Es => "es",
+            Segment::Fs => "fs",
+            Segment::Gs => "gs",
+            Segment::Ss => "ss",
+        };
+
+        self.print_register(name);
+        self.print_symbols(":");
     }
 
     /// # Parameters
@@ -158,6 +173,10 @@ impl<P: Printer> PrinterExt for P {
                         }
 
                         self.with_indirect(|p| {
+                            if mem.base_segment != Segment::Ds {    // FIXME not always default!
+                                p.print_segment(mem.base_segment);
+                            }
+
                             if let Some(base) = base {
                                 p.print_register(base.name());
                                 if disp != 0 {
@@ -175,6 +194,10 @@ impl<P: Printer> PrinterExt for P {
                         }
 
                         self.with_indirect(|p| {
+                            if mem.base_segment != Segment::Ds {    // FIXME not always default!
+                                p.print_segment(mem.base_segment);
+                            }
+
                             if let Some(base) = base {
                                 p.print_register(base.name());
                                 p.print_symbols("+");
@@ -257,6 +280,12 @@ impl<P: Printer> PrinterExt for P {
                 self.print_operand(dest, ImmReprHint::Hex, false);  // always has 1 reg operand
                 self.print_symbols(",");
                 self.print_operand(src, ImmReprHint::Hex, false);
+            }
+            MovZx { dest, src } => {
+                self.space();
+                self.print_operand(&Operand::Reg(*dest), ImmReprHint::Hex, false);
+                self.print_symbols(",");
+                self.print_operand(src, ImmReprHint::Hex, true);  // different size than dest
             }
             JumpIf { cc: _, target } => {
                 self.space();
@@ -360,6 +389,7 @@ fn mnemonic(instr: &Instr) -> String {
             ShiftOp::Sar => "sar",
         }
         Mov { .. } => "mov",
+        MovZx { .. } => "movzx",
         JumpIf { .. } => "j",
         Jump { .. } => "jmp",
         Call { .. } => "call",
