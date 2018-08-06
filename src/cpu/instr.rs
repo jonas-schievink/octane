@@ -65,6 +65,16 @@ pub enum Instr {
         target: Operand,
     },
 
+    /// Set byte to 0 or 1, depending on status flag.
+    ///
+    /// This is **not** a conditional store - it will always overwrite the
+    /// operand.
+    SetIf {
+        /// Flag to test for.
+        cc: ConditionCode,
+        operand: Operand,
+    },
+
     /// Call a procedure.
     ///
     /// Pushes `EIP` (after the `call` instruction) onto the stack, decrements

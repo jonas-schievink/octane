@@ -440,6 +440,14 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
         let default_size_bit = (byte & 0b01) != 0;      // false = 8 bit, true = 16/32 bit
 
         let instr = match byte {
+            0x90 ... 0x9F => {  // setcc
+                let cc = ConditionCode::from_u8(byte & 0x0F)
+                    .expect("cannot convert condition code");
+                let modrm = self.read_modrm()?;
+                let operand = self.read_addressing(modrm, OpSize::Bits8)?;
+
+                Instr::SetIf { cc, operand }
+            }
             0xAF => {   // imul
                 let size = self.prefixes.size(true)?;
                 let modrm = self.read_modrm()?;
@@ -816,6 +824,7 @@ mod tests {
         decodes_as("66 C9", "data16 leave");
         decodes_as("C7 45 F4 40 00 00 00", "mov [ebp-0xc],0x40");
         decodes_as("0F AF 45 E8", "imul eax,[ebp-0x18]");
+        decodes_as("0F 95 C1", "setne cl");
         // TODO shift/rotate instrs
         // TODO: `call` w/ destination
     }

@@ -312,6 +312,10 @@ impl<P: Printer> PrinterExt for P {
                 self.space();
                 self.print_jump_target_operand(target, true);
             }
+            SetIf { cc: _, operand } => {
+                self.space();
+                self.print_operand(operand, ImmReprHint::Hex, false);
+            }
             Call { target } => {
                 self.space();
                 self.print_jump_target_operand(target, false);
@@ -402,6 +406,7 @@ fn prefixes(instr: &Instr) -> Vec<&'static str> {
         | MovZx { .. }
         | JumpIf { .. }
         | Jump { .. }
+        | SetIf { .. }
         | Call { .. }
         | Ret { .. }
         | Push { .. }
@@ -457,6 +462,7 @@ fn mnemonic(instr: &Instr) -> String {
         MovZx { .. } => "movzx",
         JumpIf { cc, .. } => return format!("j{}", condition_code(*cc)),
         Jump { .. } => "jmp",
+        SetIf { cc, .. } => return format!("set{}", condition_code(*cc)),
         Call { .. } => "call",
         Ret { .. } => "ret",
         Push { .. } => "push",
