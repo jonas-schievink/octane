@@ -190,79 +190,37 @@ pub enum RegisterCode {
     DS,
 }
 
-enum Group {
-    /// Immediate Group 1.
-    Grp1 {
-        operands: [OperandSpec; 2],
-    },
-    /// POP group 1A.
-    Grp1A {
-        operands: [OperandSpec; 1],
-    },
-    /// Shift Group 2.
-    Grp2 {
-        operands: [OperandSpec; 2],
-    },
-}
-
 enum TableEntry {
     /// The byte is a prefix byte, not an instruction opcode.
     Prefix(Prefix),
-    Opcode(Opcode),
+    /// Instruction or instruction group descriptor.
+    InstrDef(InstrDef),
     /// Special entry handled by decoder (eg. extension/escape byte).
     Special,
-    /// The opcode byte denotes a group of opcodes. The instruction's actual
-    /// opcode is the `Reg` field of the following Mod-Reg-R/M byte.
-    Group(Group),
 }
 
-/// Contains information about what kind of instruction the opcode encodes, as
-/// well as how to retrieve its operands.
-enum Opcode {
-    Alu {
-        op: AluOp,
-        operands: [OperandSpec; 2],
+enum InstrDef {
+    Arity0 {
+        op: Arity0Op,
     },
-    Test {
-        operands: [OperandSpec; 2],
+    Arity1 {
+        op: Arity1Op,
+        operand: OperandSpec,
     },
-    Push {
-        operands: [OperandSpec; 1],
+    Arity2 {
+        op: Arity2Op,
+        operand1: OperandSpec,
+        operand2: OperandSpec,
     },
-    Pop {
-        /// Destination.
-        operands: [OperandSpec; 1],
+    Arity3 {
+        op: Arity3Op,
+        operand1: OperandSpec,
+        operand2: OperandSpec,
+        operand3: OperandSpec,
     },
-    Inc {
-        operands: [OperandSpec; 1],
-    },
-    Dec {
-        operands: [OperandSpec; 1],
-    },
-    /// Hardcoded in the decoder so we don't have to deal with its special
-    /// addressing mode.
-    Bound,
-    Imul {
-        // unfortunately, there doesn't seem to be an easy way to get rid of
-        // the 3 opspecs save for hardcoding all imul opcodes
-        operands: [OperandSpec; 3],
-    },
-    Jcc {
-        cc: ConditionCode,
-        operands: [OperandSpec; 1],
-    },
-    Call {
-        operands: [OperandSpec; 1],
-    },
-    Xchg {
-        operands: [OperandSpec; 2],
-    },
-    Mov {
-        operands: [OperandSpec; 2],
-    },
-    Lea {
-        operands: [OperandSpec; 2],
-    },
+}
+
+enum Arity0Op {
     Daa,
     Das,
     Aaa,
@@ -282,12 +240,40 @@ enum Opcode {
     Sahf,
     /// Copy the low byte of the EFLAGS register into AH.
     Lahf,
-    /// `ret N`
-    RetN {
-        operands: [OperandSpec; 1],
-    },
     /// `ret`
     Ret,
+}
+
+enum Arity1Op {
+    Push,
+    Pop,
+    Inc,
+    Dec,
+    Jcc {
+        cc: ConditionCode,
+    },
+    Call,
+    RetN,
+    /// POP group 1A.
+    Grp1A,
+}
+
+enum Arity2Op {
+    Alu {
+        op: AluOp,
+    },
+    Test,
+    Xchg,
+    Mov,
+    Lea,
+    /// Immediate Group 1.
+    Grp1,
+    /// Shift Group 2.
+    Grp2,
+}
+
+enum Arity3Op {
+    Imul,
 }
 
 struct OperandSpec {
@@ -390,30 +376,44 @@ macro_rules! reg_to_size {
 }
 
 macro_rules! opcode {
-    (group $grp:ident: $( $($operand:ident)+ ),+) => {
-        TableEntry::Group(Group::$grp {
-            operands: [
-                $( parse_opspec!($($operand)+), )+
-            ],
-        })
-    };
     ($op:ident) => {
         // 0-operand instruction
-        TableEntry::Opcode(Opcode::$op)
-    };
-    ($op:ident: $( $($operand:ident)+ ),+) => {
-        TableEntry::Opcode(Opcode::$op {
-            operands: [
-                $( parse_opspec!($($operand)+), )+
-            ],
+        TableEntry::InstrDef(InstrDef::Arity0 {
+            op: Arity0Op::$op,
         })
     };
-    ($op:ident: $( $($operand:ident)+ ),+ => { $($field:ident: $val:expr),+ }) => {
-        TableEntry::Opcode(Opcode::$op {
-            operands: [
-                $( parse_opspec!($($operand)+), )+
-            ],
-            $( $field: $val ),+
+    ($op:ident: $($operand:ident)+) => {
+        TableEntry::InstrDef(InstrDef::Arity1 {
+            op: Arity1Op::$op,
+            operand: parse_opspec!($($operand)+),
+        })
+    };
+    ($op:ident: $($operand:ident)+ => { $($field:ident: $val:expr),+ }) => {
+        TableEntry::InstrDef(InstrDef::Arity1 {
+            op: Arity1Op::$op { $($field: $val),+ },
+            operand: parse_opspec!($($operand)+),
+        })
+    };
+    ($op:ident: $($operand1:ident)+, $($operand2:ident)+) => {
+        TableEntry::InstrDef(InstrDef::Arity2 {
+            op: Arity2Op::$op,
+            operand1: parse_opspec!($($operand1)+),
+            operand2: parse_opspec!($($operand2)+),
+        })
+    };
+    ($op:ident: $($operand1:ident)+, $($operand2:ident)+ => { $($field:ident: $val:expr),+ }) => {
+        TableEntry::InstrDef(InstrDef::Arity2 {
+            op: Arity2Op::$op { $($field: $val),+ },
+            operand1: parse_opspec!($($operand1)+),
+            operand2: parse_opspec!($($operand2)+),
+        })
+    };
+    ($op:ident: $($operand1:ident)+, $($operand2:ident)+, $($operand3:ident)+) => {
+        TableEntry::InstrDef(InstrDef::Arity3 {
+            op: Arity3Op::$op,
+            operand1: parse_opspec!($($operand1)+),
+            operand2: parse_opspec!($($operand2)+),
+            operand3: parse_opspec!($($operand3)+),
         })
     };
 }
@@ -531,7 +531,7 @@ static ONE_BYTE_MAP: &[TableEntry] = &[
     opcode!(Pop: eDI),      // 0x5F
     opcode!(Pusha),         // 0x60
     opcode!(Popa),          // 0x61
-    opcode!(Bound), // G/v, M/a
+    special!(), // bound
     special!(), // ARPL nyi
     prefix!(OverrideFs),    // 0x64
     prefix!(OverrideGs),    // 0x65
@@ -561,10 +561,10 @@ static ONE_BYTE_MAP: &[TableEntry] = &[
     opcode!(Jcc: J b => { cc: GreaterOrEqual }),
     opcode!(Jcc: J b => { cc: LessOrEqual }),
     opcode!(Jcc: J b => { cc: Greater }),
-    opcode!(group Grp1: E b, I b),  // 0x80
-    opcode!(group Grp1: E v, I z),  // 0x81
-    opcode!(group Grp1: E b, I b),  // 0x82
-    opcode!(group Grp1: E v, I b),  // 0x83
+    opcode!(Grp1: E b, I b),  // 0x80 - immediate group 1
+    opcode!(Grp1: E v, I z),  // 0x81
+    opcode!(Grp1: E b, I b),  // 0x82
+    opcode!(Grp1: E v, I b),  // 0x83
     opcode!(Test: E b, G b),    // 0x84
     opcode!(Test: E v, G v),    // 0x85
     opcode!(Xchg: E b, G b),    // 0x86
@@ -576,7 +576,7 @@ static ONE_BYTE_MAP: &[TableEntry] = &[
     opcode!(Mov : E v, S w),     // 0x8C
     opcode!(Lea : G v, E v),     // 0x8D (technically the src is `M`)
     opcode!(Mov : S w, E w),     // 0x8E
-    opcode!(group Grp1A: E v),  // 0x8F
+    opcode!(Grp1A: E v),        // 0x8F - group 1A pop
     opcode!(Nop),               // 0x90
     opcode!(Xchg: eCX, eAX),    // 0x91
     opcode!(Xchg: eDX, eAX),    // 0x92
@@ -627,8 +627,8 @@ static ONE_BYTE_MAP: &[TableEntry] = &[
     opcode!(Mov: eDX, I w),
     opcode!(Mov: eBX, I w),     // 0xBF
 
-    opcode!(group Grp2: E b, I b),
-    opcode!(group Grp2: E v, I v),
+    opcode!(Grp2: E b, I b),
+    opcode!(Grp2: E v, I v),
 
     opcode!(RetN: I w),
     opcode!(Ret),
@@ -641,6 +641,6 @@ mod tests {
 
     #[test]
     fn mem_size() {
-        assert_eq!(mem::size_of::<TableEntry>(), 8);    // 8 = 2KB for whole table
+        assert_eq!(mem::size_of::<TableEntry>(), 8);    // 8 Bytes = 2KB for whole table
     }
 }
