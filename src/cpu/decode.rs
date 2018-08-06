@@ -474,12 +474,21 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 } else {
                     OpSize::Bits8
                 };
-                let dest_size = self.prefixes.size(default_size_bit)?;
+                let dest_size = if default_size_bit {
+                    // src is 16-bit, dest must be 32
+                    OpSize::Bits32
+                } else {
+                    // src is 8-bit, dest can be 16/32
+                    if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
+                        OpSize::Bits16
+                    } else {
+                        OpSize::Bits32
+                    }
+                };
 
                 let modrm = self.read_modrm()?;
                 let dest = modrm.reg(dest_size);
                 let src = self.read_addressing(modrm, src_size)?;
-                // FIXME: what if both src and dest are 16 bit?
 
                 Instr::MovZx { dest, src }
             }
@@ -489,12 +498,21 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 } else {
                     OpSize::Bits8
                 };
-                let dest_size = self.prefixes.size(default_size_bit)?;
+                let dest_size = if default_size_bit {
+                    // src is 16-bit, dest must be 32
+                    OpSize::Bits32
+                } else {
+                    // src is 8-bit, dest can be 16/32
+                    if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
+                        OpSize::Bits16
+                    } else {
+                        OpSize::Bits32
+                    }
+                };
 
                 let modrm = self.read_modrm()?;
                 let dest = modrm.reg(dest_size);
                 let src = self.read_addressing(modrm, src_size)?;
-                // FIXME: what if both src and dest are 16 bit?
 
                 Instr::MovSx { dest, src }
             }
@@ -859,6 +877,8 @@ mod tests {
         decodes_as("0F 95 C1", "setne cl");
         decodes_as("0F 84 AE 00 00 00", "je 0x000000B4");
         decodes_as("FF 24 85 C1 D7 15 00", "jmp dword [eax*4+0x15d7c1]");
+        decodes_as("64 0F B6 05 24 00 00 00", "movzx eax,byte [fs:0x24]");
+        decodes_as("64 0F BE 05 24 00 00 00", "movsx eax,byte [fs:0x24]");
         // TODO shift/rotate instrs
         // TODO: `call` w/ destination
     }
