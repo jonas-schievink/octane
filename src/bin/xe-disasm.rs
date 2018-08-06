@@ -209,10 +209,15 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
                     | Instr::Mov { dest: Operand::Mem(mem), src: _ }
                     | Instr::Mov { dest: _, src: Operand::Mem(mem) }
                     | Instr::Push { operand: Operand::Mem(mem) } => {
-                        if let Addressing::Disp { base: None, disp } = mem.addressing {
-                            let info = addr_info(xbe, disp as u32);
+                        // we can only be helpful if the access uses a flat
+                        // address space
+                        if !mem.base_segment.may_be_used() {
+                            // ...and if the access has a fixed, abs. address
+                            if let Addressing::Disp { base: None, disp } = mem.addressing {
+                                let info = addr_info(xbe, disp as u32);
 
-                            print!("\t{}", info);
+                                print!("\t{}", info);
+                            }
                         }
                     }
                     _ => {}

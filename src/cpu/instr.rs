@@ -354,6 +354,23 @@ pub enum Segment {
     Ss,
 }
 
+impl Segment {
+    /// Whether the segment might be used for non-flat addressing.
+    ///
+    /// Code, data and stack segments (`CS`, `DS`, and `SS`) are used to build a
+    /// flat virtual address space. The extra segment `ES` is used by string
+    /// instructions, so it also has to describe the same flat address space.
+    ///
+    /// This leaves only `FS` and `GS` for custom use by the OS, so those
+    /// return `true` here.
+    pub fn may_be_used(&self) -> bool {
+        match self {
+            Segment::Fs | Segment::Gs => true,
+            _ => false,
+        }
+    }
+}
+
 /// Addressing modes for operands in memory.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Addressing {
