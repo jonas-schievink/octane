@@ -282,7 +282,7 @@ impl<P: Printer> PrinterExt for P {
                     AluOp::Cmp => ImmReprHint::Hex,
                 };
                 self.space();
-                self.print_operand(dest, hint, false);
+                self.print_operand(dest, hint, true);
                 self.print_symbols(",");
                 self.print_operand(src, hint, false);
             }

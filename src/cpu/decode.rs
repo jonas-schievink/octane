@@ -771,8 +771,8 @@ mod tests {
         decodes_as("5F", "pop edi");
         decodes_as("C3", "ret");
         decodes_as("C2 10 00", "ret 16");
-        decodes_as("81 78 08 00 00 FE FF", "cmp [eax+0x8],0xfffe0000");
-        decodes_as("81 78 ff 00 00 FE FF", "cmp [eax-0x1],0xfffe0000");
+        decodes_as("81 78 08 00 00 FE FF", "cmp dword [eax+0x8],0xfffe0000");
+        decodes_as("81 78 ff 00 00 FE FF", "cmp dword [eax-0x1],0xfffe0000");
         decodes_as("8D BD 00 F4 FF FF", "lea edi,[ebp-0xc00]");
         decodes_as("6b 84 8b ab 00 00 00 02", "imul eax,[ebx+ecx*4+0xab],2");
         decodes_as("85 C0", "test eax,eax");

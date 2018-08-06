@@ -6,7 +6,7 @@ extern crate termcolor;
 #[macro_use] extern crate structopt;
 
 use xe::cpu::decode::*;
-use xe::cpu::instr::Instr;
+use xe::cpu::instr::{Instr, Operand};
 use xe::cpu::disasm::{Printer, print_instr};
 use xe::loader;
 use xe::memory::{TableMemory, VirtualMemory};
@@ -14,7 +14,7 @@ use xbe::Xbe;
 
 use structopt::StructOpt;
 use termcolor::{ColorChoice, Color, ColorSpec, StandardStream, WriteColor};
-use std::{fs, u32};
+use std::{cmp, fs, u32};
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -43,7 +43,8 @@ struct Opt {
     tool: Option<Disassembler>,
 
     /// Number of bytes to disassemble after the entry point (can also be a
-    /// hexadecimal value starting with `0x`). Defaults to 100.
+    /// hexadecimal value starting with `0x`). Defaults to the entire function,
+    /// or 150 bytes for external disassemblers.
     #[structopt(long = "bytes", parse(try_from_str = "parse_hex"))]
     bytes: Option<u32>,
 
@@ -52,11 +53,10 @@ struct Opt {
     #[structopt(long = "start", parse(try_from_str = "parse_hex"))]
     start: Option<u32>,
 
-    /// Whether to keep disassembling after a `ret` opcode (for external
+    /// Whether to keep disassembling after the function (for external
     /// disassemblers, this is always active).
-    #[structopt(long = "ignore-ret")]
-    ignore_ret: bool,
-    // FIXME: make this more precise by tracking jump targets
+    #[structopt(long = "continue")]
+    cont: bool,
 
     /// Path to the XBE file to disassemble.
     #[structopt(parse(from_os_str))]
@@ -141,6 +141,7 @@ fn builtin<M: VirtualMemory>(opt: &Opt, mem: &M, start: u32, byte_count: u32) {
     };
 
     let mut dec = Decoder::new(mem, start);
+    let mut max_jump_target = start;
     loop {
         let pc_before = dec.current_address();
         let result = dec.decode_next();
@@ -162,10 +163,24 @@ fn builtin<M: VirtualMemory>(opt: &Opt, mem: &M, start: u32, byte_count: u32) {
                 print_instr(&instr, &mut printer);
                 println!();
 
-                if let Instr::Ret { .. } = instr {
-                    if !opt.ignore_ret {
-                        break;
+                // track function extent and stop at the last `ret`
+                match instr {
+                    Instr::Ret { .. } if max_jump_target < pc => {
+                        // function ends here
+                        if !opt.cont {
+                            break;
+                        }
                     }
+                    Instr::Jump { target, .. } | Instr::JumpIf { target, ..} => {
+                        match target {
+                            Operand::Imm(target) => {
+                                let addr = target.zero_extended();
+                                max_jump_target = cmp::max(max_jump_target, addr);
+                            }
+                            _ => {} // can't track indirect jumps
+                        }
+                    }
+                    _ => {}
                 }
 
                 let disassembled_bytes = dec.current_address() - start;
@@ -211,10 +226,16 @@ fn main() -> Result<(), Box<Error>> {
     let mut mem = TableMemory::new();
     loader::load(&xbe, &mut mem)?;
 
+    let tool = opt.tool.unwrap_or(Disassembler::Builtin);
     let start = opt.start.unwrap_or(xbe.entry_point());
-    let bytes = opt.bytes.unwrap_or(150);
+    let bytes = opt.bytes.unwrap_or_else(|| {
+        match tool {
+            Disassembler::Builtin => u32::MAX,
+            _ => 150,
+        }
+    });
 
-    match opt.tool.unwrap_or(Disassembler::Builtin) {
+    match tool {
         Disassembler::Nasm => {
             ndisasm(&opt, &mem, start, bytes)?;
         }
