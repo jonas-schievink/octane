@@ -11,7 +11,9 @@
 
 #![allow(unused)]   // TODO remove
 
-use cpu::instr::OpSize;
+use cpu::instr::{ConditionCode, OpSize, AluOp};
+use cpu::instr::ConditionCode::*;
+use cpu::instr::AluOp::*;
 use cpu::prefix::Prefix;
 
 /// Addressing methods.
@@ -191,153 +193,75 @@ pub enum RegisterCode {
 enum Group {
     /// Immediate Group 1.
     Grp1 {
-        dest: OperandSpec,
-        src: OperandSpec,
+        operands: [OperandSpec; 2],
     },
     /// POP group 1A.
     Grp1A {
-        operand: OperandSpec,
+        operands: [OperandSpec; 1],
     },
     /// Shift Group 2.
     Grp2 {
-        dest: OperandSpec,
-        src: OperandSpec,
+        operands: [OperandSpec; 2],
     },
 }
 
 enum TableEntry {
+    /// The byte is a prefix byte, not an instruction opcode.
     Prefix(Prefix),
     Opcode(Opcode),
     /// Special entry handled by decoder (eg. extension/escape byte).
     Special,
-    /// The opcode byte denotes a group of opcodes.
+    /// The opcode byte denotes a group of opcodes. The instruction's actual
+    /// opcode is the `Reg` field of the following Mod-Reg-R/M byte.
     Group(Group),
 }
 
+/// Contains information about what kind of instruction the opcode encodes, as
+/// well as how to retrieve its operands.
 enum Opcode {
-    Add {
-        dest: OperandSpec,
-        src: OperandSpec,
-    },
-    Adc {
-        dest: OperandSpec,
-        src: OperandSpec,
-    },
-    Or {
-        dest: OperandSpec,
-        src: OperandSpec,
-    },
-    Sbb {
-        dest: OperandSpec,
-        src: OperandSpec,
-    },
-    Sub {
-        dest: OperandSpec,
-        src: OperandSpec,
-    },
-    And {
-        dest: OperandSpec,
-        src: OperandSpec,
-    },
-    Xor {
-        dest: OperandSpec,
-        src: OperandSpec,
-    },
-    Cmp {
-        dest: OperandSpec,
-        src: OperandSpec,
+    Alu {
+        op: AluOp,
+        operands: [OperandSpec; 2],
     },
     Test {
-        dest: OperandSpec,
-        src: OperandSpec,
+        operands: [OperandSpec; 2],
     },
     Push {
-        operand: OperandSpec,
+        operands: [OperandSpec; 1],
     },
     Pop {
         /// Destination.
-        operand: OperandSpec,
+        operands: [OperandSpec; 1],
     },
     Inc {
-        operand: OperandSpec,
+        operands: [OperandSpec; 1],
     },
     Dec {
-        operand: OperandSpec,
+        operands: [OperandSpec; 1],
     },
-    /*Bound {
-        /// Not really a destination - This is the index to check.
-        // FIXME consider renaming `dest` to `op1` and `src to `op2` or something
-        dest: OperandSpec,
-        /// Memory operand containing upper and lower bound.
-        src: OperandSpec,
-    },*/
+    /// Hardcoded in the decoder so we don't have to deal with its special
+    /// addressing mode.
+    Bound,
     Imul {
-        dest: OperandSpec,
-        src1: OperandSpec,
-        src2: OperandSpec,
+        // unfortunately, there doesn't seem to be an easy way to get rid of
+        // the 3 opspecs save for hardcoding all imul opcodes
+        operands: [OperandSpec; 3],
     },
-    Jo {
-        operand: OperandSpec,
-    },
-    Jno {
-        operand: OperandSpec,
-    },
-    Jb {
-        operand: OperandSpec,
-    },
-    Jae {
-        operand: OperandSpec,
-    },
-    Je {
-        operand: OperandSpec,
-    },
-    Jne {
-        operand: OperandSpec,
-    },
-    Jbe {
-        operand: OperandSpec,
-    },
-    Ja {
-        operand: OperandSpec,
-    },
-    Js {
-        operand: OperandSpec,
-    },
-    Jns {
-        operand: OperandSpec,
-    },
-    Jp {
-        operand: OperandSpec,
-    },
-    Jnp {
-        operand: OperandSpec,
-    },
-    Jl {
-        operand: OperandSpec,
-    },
-    Jge {
-        operand: OperandSpec,
-    },
-    Jle {
-        operand: OperandSpec,
-    },
-    Jg {
-        operand: OperandSpec,
+    Jcc {
+        cc: ConditionCode,
+        operands: [OperandSpec; 1],
     },
     Call {
-        operand: OperandSpec,
+        operands: [OperandSpec; 1],
     },
     Xchg {
-        dest: OperandSpec,
-        src: OperandSpec,
+        operands: [OperandSpec; 2],
     },
     Mov {
-        dest: OperandSpec,
-        src: OperandSpec,
+        operands: [OperandSpec; 2],
     },
     Lea {
-        dest: OperandSpec,
-        src: OperandSpec,
+        operands: [OperandSpec; 2],
     },
     Daa,
     Das,
@@ -360,7 +284,7 @@ enum Opcode {
     Lahf,
     /// `ret N`
     RetN {
-        operand: OperandSpec,
+        operands: [OperandSpec; 1],
     },
     /// `ret`
     Ret,
@@ -399,11 +323,17 @@ enum OperandKind {
 }
 
 /// Converts an addressing method and operand type to an operand spec.
-macro_rules! method_type_to_opspec {
-    ($m:ident/$s:ident) => {
+macro_rules! parse_opspec {
+    ($m:ident $s:ident) => {
         OperandSpec {
             size: optype_to_default_opsize!($s),
             kind: method_to_opkind!($m),
+        }
+    };
+    ($reg:ident) => {
+        OperandSpec {
+            size: reg_to_size!($reg),
+            kind: OperandKind::FixedReg(RegisterCode::$reg),
         }
     };
 }
@@ -438,6 +368,13 @@ macro_rules! optype_to_default_opsize {
 /// override prefix, though.
 macro_rules! reg_to_size {
     (AL) => {OpSize::Bits8};
+    (AH) => {OpSize::Bits8};
+    (BL) => {OpSize::Bits8};
+    (BH) => {OpSize::Bits8};
+    (CL) => {OpSize::Bits8};
+    (CH) => {OpSize::Bits8};
+    (DL) => {OpSize::Bits8};
+    (DH) => {OpSize::Bits8};
     (ES) => {OpSize::Bits16};
     (SS) => {OpSize::Bits16};
     (CS) => {OpSize::Bits16};
@@ -453,84 +390,30 @@ macro_rules! reg_to_size {
 }
 
 macro_rules! opcode {
-    (group $n:ident: $a1:ident/$o1:ident) => {
-        // group instruction with one operand
-        TableEntry::Group(Group::$n {
-            operand: method_type_to_opspec!($a1/$o1),
-        })
-    };
-    (group $n:ident: $a1:ident/$o1:ident, $a2:ident/$o2:ident) => {
-        // group instruction with 2 operands
-        TableEntry::Group(Group::$n {
-            dest: method_type_to_opspec!($a1/$o1),
-            src: method_type_to_opspec!($a2/$o2),
+    (group $grp:ident: $( $($operand:ident)+ ),+) => {
+        TableEntry::Group(Group::$grp {
+            operands: [
+                $( parse_opspec!($($operand)+), )+
+            ],
         })
     };
     ($op:ident) => {
         // 0-operand instruction
         TableEntry::Opcode(Opcode::$op)
     };
-    ($op:ident: $reg1:ident) => {
-        // one-operand instruction with fixed register operand
+    ($op:ident: $( $($operand:ident)+ ),+) => {
         TableEntry::Opcode(Opcode::$op {
-            operand: OperandSpec {
-                size: reg_to_size!($reg1),
-                kind: OperandKind::FixedReg(RegisterCode::$reg1),
-            }
+            operands: [
+                $( parse_opspec!($($operand)+), )+
+            ],
         })
     };
-    ($op:ident: $a1:ident/$o1:ident) => {
-        // one-operand instruction
+    ($op:ident: $( $($operand:ident)+ ),+ => { $($field:ident: $val:expr),+ }) => {
         TableEntry::Opcode(Opcode::$op {
-            operand: method_type_to_opspec!($a1/$o1),
-        })
-    };
-    ($op:ident: $a1:ident/$o1:ident, $a2:ident/$o2:ident) => {
-        // two-operand instruction
-        TableEntry::Opcode(Opcode::$op {
-            dest: method_type_to_opspec!($a1/$o1),
-            src: method_type_to_opspec!($a2/$o2),
-        })
-    };
-    ($op:ident: $reg1:ident, $a2:ident/$o2:ident) => {
-        // two-operand instruction, dest is register
-        TableEntry::Opcode(Opcode::$op {
-            dest: OperandSpec {
-                size: optype_to_default_opsize!($o2),   // FIXME can this use reg_to_size?
-                kind: OperandKind::FixedReg(RegisterCode::$reg1),
-            },
-            src: method_type_to_opspec!($a2/$o2),
-        })
-    };
-    ($op:ident: $a1:ident/$o1:ident, $reg2:ident) => {
-        // two-operand instruction, src is register
-        TableEntry::Opcode(Opcode::$op {
-            dest: method_type_to_opspec!($a1/$o1),
-            src: OperandSpec {
-                size: optype_to_default_opsize!($o1),   // FIXME can this use reg_to_size?
-                kind: OperandKind::FixedReg(RegisterCode::$reg2),
-            },
-        })
-    };
-    ($op:ident: $reg1:ident, $reg2:ident) => {
-        // two-operand instruction, both registers
-        TableEntry::Opcode(Opcode::$op {
-            dest: OperandSpec {
-                size: reg_to_size!($reg1),
-                kind: OperandKind::FixedReg(RegisterCode::$reg1),
-            },
-            src: OperandSpec {
-                size: reg_to_size!($reg2),
-                kind: OperandKind::FixedReg(RegisterCode::$reg2),
-            },
-        })
-    };
-    ($op:ident: $a1:ident/$o1:ident, $a2:ident/$o2:ident, $a3:ident/$o3:ident) => {
-        // three-operand instruction
-        TableEntry::Opcode(Opcode::$op {
-            dest: method_type_to_opspec!($a1/$o1),
-            src1: method_type_to_opspec!($a2/$o2),
-            src2: method_type_to_opspec!($a3/$o3),
+            operands: [
+                $( parse_opspec!($($operand)+), )+
+            ],
+            $( $field: $val ),+
         })
     };
 }
@@ -550,68 +433,68 @@ macro_rules! special {
 /// From "Table A-2. One-byte Opcode Map" (actually 2 tables with an odd split,
 /// watch out!).
 static ONE_BYTE_MAP: &[TableEntry] = &[
-    opcode!(Add: E/b, G/b), // 0x00    8-bit
-    opcode!(Add: E/v, G/v), // 0x01    16-/32-bit
-    opcode!(Add: G/b, E/b), // 0x02
-    opcode!(Add: G/v, E/v), // 0x03
-    opcode!(Add: AL,  I/b), // 0x04
-    opcode!(Add: eAX, I/z), // 0x05
+    opcode!(Alu: E b, G b => { op: Add }), // 0x00    8-bit
+    opcode!(Alu: E v, G v => { op: Add }), // 0x01    16-/32-bit
+    opcode!(Alu: G b, E b => { op: Add }), // 0x02
+    opcode!(Alu: G v, E v => { op: Add }), // 0x03
+    opcode!(Alu: AL,  I b => { op: Add }), // 0x04
+    opcode!(Alu: eAX, I z => { op: Add }), // 0x05
     opcode!(Push: ES),      // 0x06
     opcode!(Pop: ES),       // 0x07
-    opcode!(Or: E/b, G/b),  // 0x08
-    opcode!(Or: E/v, G/v),  // 0x09
-    opcode!(Or: G/b, E/b),  // 0x0A
-    opcode!(Or: G/v, E/v),  // 0x0B
-    opcode!(Or: AL,  I/b),  // 0x0C
-    opcode!(Or: eAX, I/z),  // 0x0D
+    opcode!(Alu: E b, G b => { op: Or }),  // 0x08
+    opcode!(Alu: E v, G v => { op: Or }),  // 0x09
+    opcode!(Alu: G b, E b => { op: Or }),  // 0x0A
+    opcode!(Alu: G v, E v => { op: Or }),  // 0x0B
+    opcode!(Alu: AL,  I b => { op: Or }),  // 0x0C
+    opcode!(Alu: eAX, I z => { op: Or }),  // 0x0D
     opcode!(Push: CS),      // 0x0E
     special!(),             // 0x0F
-    opcode!(Adc: E/b, G/b), // 0x10
-    opcode!(Adc: E/v, G/v), // 0x11
-    opcode!(Adc: G/b, E/b), // 0x12
-    opcode!(Adc: G/v, E/v), // 0x13
-    opcode!(Adc: AL,  I/b), // 0x14
-    opcode!(Adc: eAX, I/z), // 0x15
+    opcode!(Alu: E b, G b => { op: Adc }), // 0x10
+    opcode!(Alu: E v, G v => { op: Adc }), // 0x11
+    opcode!(Alu: G b, E b => { op: Adc }), // 0x12
+    opcode!(Alu: G v, E v => { op: Adc }), // 0x13
+    opcode!(Alu: AL,  I b => { op: Adc }), // 0x14
+    opcode!(Alu: eAX, I z => { op: Adc }), // 0x15
     opcode!(Push: SS),      // 0x16
     opcode!(Pop: SS),       // 0x17
-    opcode!(Sbb: E/b, G/b), // 0x18
-    opcode!(Sbb: E/v, G/v), // 0x19
-    opcode!(Sbb: G/b, E/b), // 0x1A
-    opcode!(Sbb: G/v, E/v), // 0x1B
-    opcode!(Sbb: AL,  I/b), // 0x1C
-    opcode!(Sbb: eAX, I/z), // 0x1D
+    opcode!(Alu: E b, G b => { op: Sbb }), // 0x18
+    opcode!(Alu: E v, G v => { op: Sbb }), // 0x19
+    opcode!(Alu: G b, E b => { op: Sbb }), // 0x1A
+    opcode!(Alu: G v, E v => { op: Sbb }), // 0x1B
+    opcode!(Alu: AL,  I b => { op: Sbb }), // 0x1C
+    opcode!(Alu: eAX, I z => { op: Sbb }), // 0x1D
     opcode!(Push: DS),      // 0x1E
     opcode!(Pop: DS),       // 0x1F
-    opcode!(And: E/b, G/b), // 0x20
-    opcode!(And: E/v, G/v), // 0x21
-    opcode!(And: G/b, E/b), // 0x22
-    opcode!(And: G/v, E/v), // 0x23
-    opcode!(And: AL,  I/b), // 0x24
-    opcode!(And: eAX, I/z), // 0x25
+    opcode!(Alu: E b, G b => { op: And }), // 0x20
+    opcode!(Alu: E v, G v => { op: And }), // 0x21
+    opcode!(Alu: G b, E b => { op: And }), // 0x22
+    opcode!(Alu: G v, E v => { op: And }), // 0x23
+    opcode!(Alu: AL,  I b => { op: And }), // 0x24
+    opcode!(Alu: eAX, I z => { op: And }), // 0x25
     prefix!(OverrideEs),    // 0x26
     opcode!(Daa),           // 0x27
-    opcode!(Sub: E/b, G/b), // 0x28
-    opcode!(Sub: E/v, G/v), // 0x29
-    opcode!(Sub: G/b, E/b), // 0x2A
-    opcode!(Sub: G/v, E/v), // 0x2B
-    opcode!(Sub: AL,  I/b), // 0x2C
-    opcode!(Sub: eAX, I/z), // 0x2D
+    opcode!(Alu: E b, G b => { op: Sub }), // 0x28
+    opcode!(Alu: E v, G v => { op: Sub }), // 0x29
+    opcode!(Alu: G b, E b => { op: Sub }), // 0x2A
+    opcode!(Alu: G v, E v => { op: Sub }), // 0x2B
+    opcode!(Alu: AL,  I b => { op: Sub }), // 0x2C
+    opcode!(Alu: eAX, I z => { op: Sub }), // 0x2D
     prefix!(OverrideCs),    // 0x2E
     opcode!(Das),           // 0x2F
-    opcode!(Xor: E/b, G/b), // 0x30
-    opcode!(Xor: E/v, G/v), // 0x31
-    opcode!(Xor: G/b, E/b), // 0x32
-    opcode!(Xor: G/v, E/v), // 0x33
-    opcode!(Xor: AL,  I/b), // 0x34
-    opcode!(Xor: eAX, I/z), // 0x35
+    opcode!(Alu: E b, G b => { op: Xor }), // 0x30
+    opcode!(Alu: E v, G v => { op: Xor }), // 0x31
+    opcode!(Alu: G b, E b => { op: Xor }), // 0x32
+    opcode!(Alu: G v, E v => { op: Xor }), // 0x33
+    opcode!(Alu: AL,  I b => { op: Xor }), // 0x34
+    opcode!(Alu: eAX, I z => { op: Xor }), // 0x35
     prefix!(OverrideSs),    // 0x36
     opcode!(Aaa),           // 0x37
-    opcode!(Cmp: E/b, G/b), // 0x38
-    opcode!(Cmp: E/v, G/v), // 0x39
-    opcode!(Cmp: G/b, E/b), // 0x3A
-    opcode!(Cmp: G/v, E/v), // 0x3B
-    opcode!(Cmp: AL,  I/b), // 0x3C
-    opcode!(Cmp: eAX, I/z), // 0x3D
+    opcode!(Alu: E b, G b => { op: Cmp }), // 0x38
+    opcode!(Alu: E v, G v => { op: Cmp }), // 0x39
+    opcode!(Alu: G b, E b => { op: Cmp }), // 0x3A
+    opcode!(Alu: G v, E v => { op: Cmp }), // 0x3B
+    opcode!(Alu: AL,  I b => { op: Cmp }), // 0x3C
+    opcode!(Alu: eAX, I z => { op: Cmp }), // 0x3D
     prefix!(OverrideDs),    // 0x3E
     opcode!(Aas),           // 0x3F
     opcode!(Inc: eAX),      // 0x40
@@ -648,52 +531,52 @@ static ONE_BYTE_MAP: &[TableEntry] = &[
     opcode!(Pop: eDI),      // 0x5F
     opcode!(Pusha),         // 0x60
     opcode!(Popa),          // 0x61
-    special!(), //opcode!(Bound: G/v, M/a),
+    opcode!(Bound), // G/v, M/a
     special!(), // ARPL nyi
     prefix!(OverrideFs),    // 0x64
     prefix!(OverrideGs),    // 0x65
     prefix!(OperandSize),   // 0x66
     prefix!(AddressSize),   // 0x67
-    opcode!(Push: I/z),     // 0x68
-    opcode!(Imul: G/v, E/v, I/z),   // 0x69
-    opcode!(Push: I/b),     // 0x6A
-    opcode!(Imul: G/v, E/v, I/z),   // 0x6B
+    opcode!(Push: I z),     // 0x68
+    opcode!(Imul: G v, E v, I z),   // 0x69
+    opcode!(Push: I b),     // 0x6A
+    opcode!(Imul: G v, E v, I z),   // 0x6B
     special!(), // INSB nyi (lol)
     special!(), // INSW nyi (lol)
     special!(), // OUTSB nyi (lol)
     special!(), // OUTSW nyi (lol)
-    opcode!(Jo: J/b),
-    opcode!(Jno: J/b),
-    opcode!(Jb: J/b),
-    opcode!(Jae: J/b),
-    opcode!(Je: J/b),
-    opcode!(Jne: J/b),
-    opcode!(Jbe: J/b),
-    opcode!(Ja: J/b),
-    opcode!(Js: J/b),
-    opcode!(Jns: J/b),
-    opcode!(Jp: J/b),
-    opcode!(Jnp: J/b),
-    opcode!(Jl: J/b),
-    opcode!(Jge: J/b),
-    opcode!(Jle: J/b),
-    opcode!(Jg: J/b),       // 0x7F
-    opcode!(group Grp1: E/b, I/b),  // 0x80
-    opcode!(group Grp1: E/v, I/z),  // 0x81
-    opcode!(group Grp1: E/b, I/b),  // 0x82
-    opcode!(group Grp1: E/v, I/b),  // 0x83
-    opcode!(Test: E/b, G/b),    // 0x84
-    opcode!(Test: E/v, G/v),    // 0x85
-    opcode!(Xchg: E/b, G/b),    // 0x86
-    opcode!(Xchg: E/v, G/v),    // 0x87
-    opcode!(Mov: E/b, G/b),     // 0x88
-    opcode!(Mov: E/v, G/v),     // 0x89
-    opcode!(Mov: G/b, E/b),     // 0x8A
-    opcode!(Mov: G/v, E/v),     // 0x8B
-    opcode!(Mov: E/v, S/w),     // 0x8C
-    opcode!(Lea: G/v, E/v),     // 0x8D (technically the src is `M`)
-    opcode!(Mov: S/w, E/w),     // 0x8E
-    opcode!(group Grp1A: E/v),  // 0x8F
+    opcode!(Jcc: J b => { cc: Overflow }),
+    opcode!(Jcc: J b => { cc: NotOverflow }),
+    opcode!(Jcc: J b => { cc: Carry }),     // Below
+    opcode!(Jcc: J b => { cc: NotCarry }),  // Above or Equal
+    opcode!(Jcc: J b => { cc: Equal }),
+    opcode!(Jcc: J b => { cc: NotEqual }),
+    opcode!(Jcc: J b => { cc: BelowOrEqual }),
+    opcode!(Jcc: J b => { cc: Above }),
+    opcode!(Jcc: J b => { cc: Sign }),
+    opcode!(Jcc: J b => { cc: NotSign }),
+    opcode!(Jcc: J b => { cc: Parity }),
+    opcode!(Jcc: J b => { cc: NotParity }),
+    opcode!(Jcc: J b => { cc: Less }),
+    opcode!(Jcc: J b => { cc: GreaterOrEqual }),
+    opcode!(Jcc: J b => { cc: LessOrEqual }),
+    opcode!(Jcc: J b => { cc: Greater }),
+    opcode!(group Grp1: E b, I b),  // 0x80
+    opcode!(group Grp1: E v, I z),  // 0x81
+    opcode!(group Grp1: E b, I b),  // 0x82
+    opcode!(group Grp1: E v, I b),  // 0x83
+    opcode!(Test: E b, G b),    // 0x84
+    opcode!(Test: E v, G v),    // 0x85
+    opcode!(Xchg: E b, G b),    // 0x86
+    opcode!(Xchg: E v, G v),    // 0x87
+    opcode!(Mov : E b, G b),     // 0x88
+    opcode!(Mov : E v, G v),     // 0x89
+    opcode!(Mov : G b, E b),     // 0x8A
+    opcode!(Mov : G v, E v),     // 0x8B
+    opcode!(Mov : E v, S w),     // 0x8C
+    opcode!(Lea : G v, E v),     // 0x8D (technically the src is `M`)
+    opcode!(Mov : S w, E w),     // 0x8E
+    opcode!(group Grp1A: E v),  // 0x8F
     opcode!(Nop),               // 0x90
     opcode!(Xchg: eCX, eAX),    // 0x91
     opcode!(Xchg: eDX, eAX),    // 0x92
@@ -704,49 +587,50 @@ static ONE_BYTE_MAP: &[TableEntry] = &[
     opcode!(Xchg: eDI, eAX),    // 0x97
     opcode!(Cwde),              // 0x98
     opcode!(Cdq),               // 0x99
-    opcode!(Call: A/p),         // 0x9A
+    opcode!(Call: A p),         // 0x9A
     opcode!(Fwait),             // 0x9B
     opcode!(Pushfd),            // 0x9C
     opcode!(Popfd),             // 0x9D
     opcode!(Sahf),              // 0x9E
     opcode!(Lahf),              // 0x9F
-    opcode!(Mov: AL, O/b),      // 0xA0
-    opcode!(Mov: eAX, O/w),     // 0xA1
-    opcode!(Mov: O/b, AL),      // 0xA2
-    opcode!(Mov: O/w, eAX),     // 0xA3
+    opcode!(Mov: AL, O b),      // 0xA0
+    opcode!(Mov: eAX, O w),     // 0xA1
+    opcode!(Mov: O b, AL),      // 0xA2
+    opcode!(Mov: O w, eAX),     // 0xA3
     special!(), // NYI: movs
     special!(), // NYI: movs
     special!(), // NYI: cmps
     special!(), // NYI: cmps
-    opcode!(Test: AL, I/b),     // 0xA8
-    opcode!(Test: eAX, I/w),    // 0xA9
+    opcode!(Test: AL, I b),     // 0xA8
+    opcode!(Test: eAX, I w),    // 0xA9
+    //opcode!(Stos: Y/b, AL),
     special!(), // NYI: stos
     special!(), // NYI: stos
     special!(), // NYI: lods
     special!(), // NYI: lods
     special!(), // NYI: scas
     special!(), // NYI: scas
-    opcode!(Mov: AL, I/b),      // 0xB0
-    opcode!(Mov: CL, I/b),
-    opcode!(Mov: DL, I/b),
-    opcode!(Mov: BL, I/b),
-    opcode!(Mov: AH, I/b),
-    opcode!(Mov: CH, I/b),
-    opcode!(Mov: DH, I/b),
-    opcode!(Mov: BH, I/b),      // 0xB7
-    opcode!(Mov: eAX, I/w),     // 0xB8
-    opcode!(Mov: eCX, I/w),
-    opcode!(Mov: eDX, I/w),
-    opcode!(Mov: eBX, I/w),
-    opcode!(Mov: eAX, I/w),
-    opcode!(Mov: eCX, I/w),
-    opcode!(Mov: eDX, I/w),
-    opcode!(Mov: eBX, I/w),     // 0xBF
+    opcode!(Mov: AL, I b),      // 0xB0
+    opcode!(Mov: CL, I b),
+    opcode!(Mov: DL, I b),
+    opcode!(Mov: BL, I b),
+    opcode!(Mov: AH, I b),
+    opcode!(Mov: CH, I b),
+    opcode!(Mov: DH, I b),
+    opcode!(Mov: BH, I b),      // 0xB7
+    opcode!(Mov: eAX, I w),     // 0xB8
+    opcode!(Mov: eCX, I w),
+    opcode!(Mov: eDX, I w),
+    opcode!(Mov: eBX, I w),
+    opcode!(Mov: eAX, I w),
+    opcode!(Mov: eCX, I w),
+    opcode!(Mov: eDX, I w),
+    opcode!(Mov: eBX, I w),     // 0xBF
 
-    opcode!(group Grp2: E/b, I/b),
-    opcode!(group Grp2: E/v, I/v),
+    opcode!(group Grp2: E b, I b),
+    opcode!(group Grp2: E v, I v),
 
-    opcode!(RetN: I/w),
+    opcode!(RetN: I w),
     opcode!(Ret),
 ];
 
@@ -757,6 +641,6 @@ mod tests {
 
     #[test]
     fn mem_size() {
-        assert_eq!(mem::size_of::<TableEntry>(), 8);
+        assert_eq!(mem::size_of::<TableEntry>(), 8);    // 8 = 2KB for whole table
     }
 }

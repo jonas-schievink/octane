@@ -334,12 +334,16 @@ pub enum Addressing {
     ///
     /// Where `base` and `index` represent the value stored inside the `base`
     /// and `index` registers, respectively.
+    ///
+    /// Note that at least one of `index` and `base` must be specified.
     Sib {
         /// The scale value multiplied with the value of the `index` register.
         ///
         /// 1, 2, 4, or 8.
         scale: u8,
-        index: Register,
+        /// Index register multiplied with `scale`. If `None`, just base
+        /// register and displacement are used to calculate the address.
+        index: Option<Register>,
         /// Base offset register.
         ///
         /// Might be `None` if `Mod=00` and `Base=101`, which is

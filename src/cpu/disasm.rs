@@ -198,16 +198,29 @@ impl<P: Printer> PrinterExt for P {
                                 p.print_segment(mem.base_segment);
                             }
 
-                            if let Some(base) = base {
-                                p.print_register(base.name());
-                                p.print_symbols("+");
+                            match (base, index) {
+                                (Some(base), None) => {
+                                    p.print_register(base.name());
+                                }
+                                (Some(base), Some(index)) => {
+                                    p.print_register(base.name());
+                                    p.print_symbols("+");
+                                    p.print_register(index.name());
+                                    if scale > 1 {
+                                        p.print_symbols("*");
+                                        p.print_addr_or_offset(&scale.to_string());
+                                    }
+                                }
+                                (None, Some(index)) => {
+                                    p.print_register(index.name());
+                                    if scale > 1 {
+                                        p.print_symbols("*");
+                                        p.print_addr_or_offset(&scale.to_string());
+                                    }
+                                }
+                                (None, None) => unreachable!("SIB addressing without base and index"),
                             }
 
-                            p.print_register(index.name());
-                            if scale > 1 {
-                                p.print_symbols("*");
-                                p.print_addr_or_offset(&scale.to_string());
-                            }
                             if disp != 0 {
                                 p.print_symbols(if disp > 0 { "+" } else { "-" });
                                 p.print_addr_or_offset(&format!("{:#x}", disp.abs()));

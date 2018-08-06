@@ -602,7 +602,7 @@ struct Sib {
     /// 1, 2, 4 or 8
     scale_val: u8,
     /// The index register to multiply with the scale value.
-    index: Register,
+    index: Option<Register>,
     /// The base register, or `None` if Base is `0b101` and Mod is `0b00`.
     base: Option<Register>,
 }
@@ -622,12 +622,13 @@ impl Sib {
             0b11 => 8,
             _ => unreachable!(),
         };
-        if index == 0b100 {
-            // cannot use stack pointer here
-            return Err(DecoderError::ud(format!("use of ESP as SIB index reg")));
-        }
 
-        let index = ModRegRm::conv_reg(index, OpSize::Bits32);
+        let index = if index == 0b100 {
+            // this would encode ESP, but is special-cased to leave out the index reg
+            None
+        } else {
+            Some(ModRegRm::conv_reg(index, OpSize::Bits32))
+        };
         let base = if base == 0b101 && mode == AddressingMode::RegIndirect {
             // displacement-only
             None
@@ -745,6 +746,7 @@ mod tests {
         decodes_as("6b 84 8b ab 00 00 00 02", "imul eax,[ebx+ecx*4+0xab],2");
         decodes_as("85 C0", "test eax,eax");
         decodes_as("C1 E9 02", "shr ecx,2");
+        decodes_as("FF 74 24 04", "push dword [esp+0x4]");
         // TODO shift/rotate instrs
     }
 
