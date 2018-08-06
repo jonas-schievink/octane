@@ -190,6 +190,22 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                     Instr::Push { operand: reg.into() }
                 }
             }
+            _ if bitpat!(0 1 0 0 _ _ _ _)(byte) => {  // 0x4_
+                // inc/dec register
+                let size = if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
+                    OpSize::Bits16
+                } else {
+                    OpSize::Bits32
+                };
+                let is_dec = byte & 0b1000 != 0;
+                let operand = ModRegRm::conv_reg(byte & 0b111, size).into();
+
+                if is_dec {
+                    Instr::Dec { operand }
+                } else {
+                    Instr::Inc { operand }
+                }
+            }
             _ if bitpat!(0 1 1 0 1 0 _ 0)(byte) => {  // 0x68 / 0x6A
                 // push immediate
 
