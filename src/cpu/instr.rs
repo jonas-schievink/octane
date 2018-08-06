@@ -184,7 +184,7 @@ pub enum Instr {
     Idiv {
         operand: Operand,
     },
-    // There's no truncating idiv with more than 1 operand
+    // There's no idiv with more than 1 operand
 
     Inc {
         operand: Operand,
@@ -194,19 +194,17 @@ pub enum Instr {
         operand: Operand,
     },
 
-    /// Store string.
-    ///
-    /// Stores `AL`, `AX` or `EAX` into `es:edi` or `es:di`. Segment override
-    /// prefixes are not allowed.
-    ///
-    /// After a value is stored, `di`/`edi` is incremented by the number of
-    /// bytes stored if the `DF` flag is 0, and decremented if it's 1.
-    Stos {
-        /// Whether a `rep` prefix is present.
+    /// String memory operation (`ins`, `outs`, `movs`, `lods`, `stos`).
+    StrMem {
+        /// The operation to perform.
+        op: StrMemOp,
+        /// Whether a `rep` prefix was present.
         ///
         /// This will perform the operation as many times as specified in
         /// `CX`/`ECX`, decrementing its value each time.
         rep: bool,
+        /// The amount of data to move (per iteration). Also specifies the part
+        /// of the `a` register to use.
         size: OpSize,
     },
 
@@ -740,6 +738,40 @@ pub enum ConditionCode {
     Parity = 0xA,
     /// SF=1
     Sign = 0x8,
+}
+
+/// "String" operation for data movement (more like batch memory operation).
+#[derive(Debug, Clone)]
+pub enum StrMemOp {
+    /// Input string from port.
+    Ins(u16),
+    /// Output string to port.
+    Outs(u16),
+    /// Move string within memory.
+    ///
+    /// The source address is defined as `ds:(e)si`, the destination as
+    /// `es:(e)si`. A segment prefix overrides only the `ds` segment.
+    ///
+    /// After a byte, word or dword is moved, both `(e)si` and `(e)di` are
+    /// incremented by the number of bytes copied if the `DF` flag is 0, and
+    /// decremented if it is 1.
+    Movs,
+    /// Load string from memory into `al`/`ax`/`eax`.
+    ///
+    /// Always uses the `ds` segment for memory access. Segment override
+    /// prefixes are not allowed.
+    ///
+    /// After a value is stored, `di`/`edi` is incremented by the number of
+    /// bytes stored if the `DF` flag is 0, and decremented if it's 1.
+    Lods,
+    /// Store string data from `al`/`ax`/`eax` to memory at `es:edi` or `es:di`.
+    ///
+    /// Always uses the `es` segment for memory access. Segment override
+    /// prefixes are not allowed.
+    ///
+    /// After a value is stored, `di`/`edi` is incremented by the number of
+    /// bytes stored if the `DF` flag is 0, and decremented if it's 1.
+    Stos,
 }
 
 /*

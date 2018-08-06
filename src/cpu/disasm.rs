@@ -376,9 +376,14 @@ impl<P: Printer> PrinterExt for P {
                 self.space();
                 self.print_immediate(&vector.to_string());
             }
+            StrMem { op: StrMemOp::Outs(port), .. }
+            | StrMem { op: StrMemOp::Ins(port), .. } => {
+                self.space();
+                self.print_immediate(&port.to_string());
+            }
             Leave { .. }
             | IntO
-            | Stos { .. }
+            | StrMem { .. }
             | Cwd
             | Cdq => {},    // no operands
         }
@@ -416,8 +421,8 @@ fn prefixes(instr: &Instr) -> Vec<&'static str> {
         | IntO
         | Cwd
         | Cdq => vec![],  // prefixes don't need display or are unsupported
-        Stos { rep: true, .. } => vec!["rep"],
-        Stos { rep: false, .. } => vec![],
+        StrMem { rep: true, .. } => vec!["rep"],
+        StrMem { rep: false, .. } => vec![],
         Leave { size: OpSize::Bits16 } => vec!["data16"],
         Leave { size: _ } => vec![],
     }
@@ -427,8 +432,7 @@ fn mnemonic(instr: &Instr) -> String {
     use cpu::instr::Instr::*;
     use cpu::instr::AluOp;
 
-    let mut f = String::new();
-    f.push_str(match instr {
+    let simple = match instr {
         Alu { op, .. } => match op {
             AluOp::Add => "add",
             AluOp::Or => "or",
@@ -451,7 +455,7 @@ fn mnemonic(instr: &Instr) -> String {
         }
         Mov { .. } => "mov",
         MovZx { .. } => "movzx",
-        JumpIf { .. } => "j",
+        JumpIf { cc, .. } => return format!("j{}", condition_code(*cc)),
         Jump { .. } => "jmp",
         Call { .. } => "call",
         Ret { .. } => "ret",
@@ -467,23 +471,30 @@ fn mnemonic(instr: &Instr) -> String {
         Idiv { .. } => "idiv",
         Inc { .. } => "inc",
         Dec { .. } => "dec",
-        Stos { size, rep: _ } => match size {
-            OpSize::Bits8 => "stosb",
-            OpSize::Bits16 => "stosw",
-            OpSize::Bits32 => "stosd",
+        StrMem { op, size, rep: _ } => {
+            let mut s = String::new();
+            s.push_str(match op {
+                StrMemOp::Ins(_) => "ins",
+                StrMemOp::Outs(_) => "outs",
+                StrMemOp::Movs => "movs",
+                StrMemOp::Lods => "lods",
+                StrMemOp::Stos => "stos",
+            });
+            s.push_str(match size {
+                OpSize::Bits8 => "b",
+                OpSize::Bits16 => "w",
+                OpSize::Bits32 => "d",
+            });
+            return s;
         },
         Leave { .. } => "leave",
         Int { .. } => "int",
         IntO => "into",
         Cwd => "cwd",
         Cdq => "cdq",
-    });
+    };
 
-    if let JumpIf { cc, .. } = instr {
-        f.push_str(condition_code(*cc));
-    }
-
-    f
+    simple.to_string()
 }
 
 fn condition_code(cc: ConditionCode) -> &'static str {

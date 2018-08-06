@@ -200,7 +200,7 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
                                 let addr = target.zero_extended();
                                 max_jump_target = cmp::max(max_jump_target, addr);
                             }
-                            _ => {} // can't track indirect jumps
+                            _ => {} // can't track indirect jumps, assume they're outside of fn
                         }
                     }
                     // display the target for indirect calls where the target

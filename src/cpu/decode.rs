@@ -373,11 +373,17 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 Instr::ImulTrunc { dest, src1, src2 }
             }
+            0xA4 | 0xA5 => {    // movs
+                let size = self.prefixes.size(default_size_bit)?;
+                let rep = self.prefixes.take(PrefixFlags::REP_REPE);
+
+                Instr::StrMem { op: StrMemOp::Movs, rep, size }
+            }
             0xAA | 0xAB => {    // stos (stosb, stosw, stosd)
                 let size = self.prefixes.size(default_size_bit)?;
                 let rep = self.prefixes.take(PrefixFlags::REP_REPE);
 
-                Instr::Stos { rep, size }
+                Instr::StrMem { op: StrMemOp::Stos, rep, size }
             }
             0xFF => {
                 // Inc/Dec/Push group 4
