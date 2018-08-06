@@ -58,6 +58,11 @@ struct Opt {
     #[structopt(long = "continue")]
     cont: bool,
 
+    /// Whether to follow `call` instructions and disassemble all callees
+    /// recursively. Only works with the builtin disassembler.
+    #[structopt(long = "follow-calls")]
+    follow_calls: bool,
+
     /// Path to the XBE file to disassemble.
     #[structopt(parse(from_os_str))]
     path: PathBuf,
@@ -157,14 +162,24 @@ fn addr_info(xbe: &Xbe, addr: u32) -> String {
     info
 }
 
-fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_count: u32) {
+// returns the list of callees of this function
+fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_count: u32) -> Vec<u32> {
     let mut printer = TermPrinter {
         w: StandardStream::stdout(ColorChoice::Auto),
         pc: start,
     };
 
+    printer.print(COLOR_ADDR, &format!("{:08X}  ", start));
+    let section = xbe.header()
+        .find_section_containing(start)
+        .map(|sec| sec.name())
+        .unwrap_or("<unmapped>");
+    printer.print_symbols(&format!("disassembly start (in section '{}')", section));
+    println!();
+
     let mut dec = Decoder::new(mem, start);
     let mut max_jump_target = start;
+    let mut callees = Vec::new();
     loop {
         let pc_before = dec.current_address();
         let result = dec.decode_next();
@@ -184,6 +199,11 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
                 printer.print(COLOR_IMMEDIATE, &raw);
 
                 print_instr(&instr, &mut printer);
+
+                if let Instr::Call { target: Operand::Imm(imm) } = &instr {
+                    // calls to fixed callees can be followed
+                    callees.push(imm.zero_extended());
+                }
 
                 // track function extent and stop at the last `ret`
                 match instr {
@@ -235,6 +255,8 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
             },
         }
     }
+
+    callees
 }
 
 fn ndisasm<M: VirtualMemory>(_opt: &Opt, mem: &M, start: u32, byte_count: u32) -> Result<(), Box<Error>> {
@@ -281,7 +303,11 @@ fn main() -> Result<(), Box<Error>> {
             ndisasm(&opt, &mem, start, bytes)?;
         }
         Disassembler::Builtin => {
-            builtin(&xbe, &opt, &mem, start, bytes);
+            // FIXME might be nice to print the call stack
+            let mut callees = builtin(&xbe, &opt, &mem, start, bytes);
+            while opt.follow_calls && !callees.is_empty() {
+                callees = callees.iter().flat_map(|callee| builtin(&xbe, &opt, &mem, *callee, u32::MAX)).collect();
+            }
         }
     }
 
