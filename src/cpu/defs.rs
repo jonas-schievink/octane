@@ -585,8 +585,8 @@ static ONE_BYTE_MAP: &[TableEntry] = &[
     opcode!(Xchg: eBP, eAX),    // 0x95
     opcode!(Xchg: eSI, eAX),    // 0x96
     opcode!(Xchg: eDI, eAX),    // 0x97
-    opcode!(Cwde),              // 0x98
-    opcode!(Cdq),               // 0x99
+    opcode!(Cwde),              // 0x98 (cbw with opsize prefix)
+    opcode!(Cdq),               // 0x99 (cwd with opsize prefix)
     opcode!(Call: A p),         // 0x9A
     opcode!(Fwait),             // 0x9B
     opcode!(Pushfd),            // 0x9C
