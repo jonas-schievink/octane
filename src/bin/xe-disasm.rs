@@ -170,7 +170,7 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
         let result = dec.decode_next();
         match result {
             Ok(instr) => {
-                printer.print(COLOR_ADDR, &format!("{:08X}   ", pc_before));
+                printer.print(COLOR_ADDR, &format!("{:08X}  ", pc_before));
 
                 let pc = dec.current_address();
                 printer.pc = pc;
@@ -179,7 +179,7 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
                 for addr in pc_before..pc {
                     write!(raw, "{:02X} ", mem.load(addr).expect("could decode instr but not read mem?")).unwrap();
                 }
-                raw = format!("{:20}  ", raw);
+                raw = format!("{:21} ", raw);
 
                 printer.print(COLOR_IMMEDIATE, &raw);
 

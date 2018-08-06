@@ -163,7 +163,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 Instr::Mov { dest, src }
             }
             _ if bitpat!(0 1 1 1 _ _ _ _)(byte) => {  // 0x7_
-                // conditional jumps
+                // conditional short jumps
 
                 // get rid of branch hint prefixes
                 match self.prefixes.segment(Segment::Cs) {
@@ -440,6 +440,18 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
         let default_size_bit = (byte & 0b01) != 0;      // false = 8 bit, true = 16/32 bit
 
         let instr = match byte {
+            0x80 ... 0x8F => {  // jcc - conditional near jump (16/32-bit offset)
+                let cc = ConditionCode::from_u8(byte & 0x0F)
+                    .expect("cannot convert condition code");
+                // assume 32-bit - 16-bit clears the upper half of EIP, which is weird
+
+                // EIP after the instr.
+                let offset = self.read_i32()?;
+                let eip = self.pos;
+                let target = Immediate::Imm32(eip.wrapping_add(offset as u32) as i32).into();
+
+                Instr::JumpIf { cc, target }
+            }
             0x90 ... 0x9F => {  // setcc
                 let cc = ConditionCode::from_u8(byte & 0x0F)
                     .expect("cannot convert condition code");
@@ -825,6 +837,7 @@ mod tests {
         decodes_as("C7 45 F4 40 00 00 00", "mov [ebp-0xc],0x40");
         decodes_as("0F AF 45 E8", "imul eax,[ebp-0x18]");
         decodes_as("0F 95 C1", "setne cl");
+        decodes_as("0F 84 AE 00 00 00", "je 0x000000B4");
         // TODO shift/rotate instrs
         // TODO: `call` w/ destination
     }
