@@ -483,6 +483,21 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 Instr::MovZx { dest, src }
             }
+            0xBE | 0xBF => {    // movsx
+                let src_size = if default_size_bit {
+                    OpSize::Bits16
+                } else {
+                    OpSize::Bits8
+                };
+                let dest_size = self.prefixes.size(default_size_bit)?;
+
+                let modrm = self.read_modrm()?;
+                let dest = modrm.reg(dest_size);
+                let src = self.read_addressing(modrm, src_size)?;
+                // FIXME: what if both src and dest are 16 bit?
+
+                Instr::MovSx { dest, src }
+            }
             _ => unimplemented!("0x0F expansion opcode {:#04X}", byte),
         };
 
@@ -549,7 +564,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                     scale: sib.scale_val,
                     index: sib.index,
                     base: sib.base,
-                    disp: self.read_disp(mode)?,
+                    disp: self.read_disp(sib.disp_mode)?,
                 },
             }.into());
         }
@@ -689,10 +704,13 @@ struct Sib {
     index: Option<Register>,
     /// The base register, or `None` if Base is `0b101` and Mod is `0b00`.
     base: Option<Register>,
+    /// Displacement addr. mode. The Mod-Reg-R/M addressing mode can be
+    /// overridden.
+    disp_mode: AddressingMode,
 }
 
 impl Sib {
-    fn decode(raw: u8, mode: AddressingMode) -> Result<Self, DecoderError> {
+    fn decode(raw: u8, mut mode: AddressingMode) -> Result<Self, DecoderError> {
         let (scale, index, base) = (
             raw >> 6,
             (raw & 0b00111000) >> 3,
@@ -714,7 +732,8 @@ impl Sib {
             Some(ModRegRm::conv_reg(index, OpSize::Bits32))
         };
         let base = if base == 0b101 && mode == AddressingMode::RegIndirect {
-            // displacement-only
+            // displacement-only enforces a 32-bit displacement
+            mode = AddressingMode::FourByteDisplacement;    // disp32
             None
         } else {
             Some(ModRegRm::conv_reg(base, OpSize::Bits32))
@@ -724,6 +743,7 @@ impl Sib {
             scale_val: scale,
             index,
             base,
+            disp_mode: mode,
         })
     }
 }
@@ -838,6 +858,7 @@ mod tests {
         decodes_as("0F AF 45 E8", "imul eax,[ebp-0x18]");
         decodes_as("0F 95 C1", "setne cl");
         decodes_as("0F 84 AE 00 00 00", "je 0x000000B4");
+        decodes_as("FF 24 85 C1 D7 15 00", "jmp dword [eax*4+0x15d7c1]");
         // TODO shift/rotate instrs
         // TODO: `call` w/ destination
     }

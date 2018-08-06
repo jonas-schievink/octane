@@ -298,7 +298,8 @@ impl<P: Printer> PrinterExt for P {
                 self.print_symbols(",");
                 self.print_operand(src, ImmReprHint::Hex, false);
             }
-            MovZx { dest, src } => {
+            MovZx { dest, src }
+            | MovSx { dest, src } => {
                 self.space();
                 self.print_operand(&Operand::Reg(*dest), ImmReprHint::Hex, false);
                 self.print_symbols(",");
@@ -404,6 +405,7 @@ fn prefixes(instr: &Instr) -> Vec<&'static str> {
         | Shift { .. }
         | Mov { .. }
         | MovZx { .. }
+        | MovSx { .. }
         | JumpIf { .. }
         | Jump { .. }
         | SetIf { .. }
@@ -460,6 +462,7 @@ fn mnemonic(instr: &Instr) -> String {
         }
         Mov { .. } => "mov",
         MovZx { .. } => "movzx",
+        MovSx { .. } => "movsx",
         JumpIf { cc, .. } => return format!("j{}", condition_code(*cc)),
         Jump { .. } => "jmp",
         SetIf { cc, .. } => return format!("set{}", condition_code(*cc)),
