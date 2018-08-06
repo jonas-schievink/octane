@@ -270,6 +270,18 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 Instr::Shift { op, dest, src }
             }
+            0xC6 | 0xC7 => {
+                // grp 11 - mov
+                let size = self.prefixes.size(default_size_bit)?;
+                let modrm = self.read_modrm()?;
+                let dest = self.read_addressing(modrm, size)?;
+                if modrm.reg_raw() != 0 {
+                    return Err(DecoderError::ud("0xC6/0xC7 with non-0 Reg field"));
+                }
+                let src = self.read_immediate(size)?.into();
+
+                Instr::Mov { dest, src }
+            }
             0xC9 => {
                 let size = if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
                     OpSize::Bits16
@@ -788,6 +800,7 @@ mod tests {
         decodes_as("F3 AB", "rep stosd");
         decodes_as("C9", "leave");
         decodes_as("66 C9", "data16 leave");
+        decodes_as("C7 45 F4 40 00 00 00", "mov [ebp-0xc],0x40");
         // TODO shift/rotate instrs
         // TODO: `call` w/ destination
     }
