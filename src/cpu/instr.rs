@@ -208,6 +208,14 @@ pub enum Instr {
         size: OpSize,
     },
 
+    /// Raise interrupt.
+    Int {
+        vector: u8,
+    },
+
+    /// Raise interrupt 4 if overflow flag is set.
+    IntO,
+
     /// Convert Word to Double word.
     ///
     /// Write the most significant bit of `AX` into all of `DX`.

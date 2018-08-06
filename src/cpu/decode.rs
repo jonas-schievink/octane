@@ -389,6 +389,13 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                     _ => unreachable!(),
                 }
             }
+            0xCC => Instr::Int { vector: 3 },   // int 3
+            0xCD => {
+                Instr::Int {
+                    vector: self.read()?,
+                }
+            }
+            0xCE => Instr::IntO,
             0x0F => self.decode_0f()?,
             _ => unimplemented!("opcode {:#04X}", byte),
         };
@@ -782,6 +789,7 @@ mod tests {
         decodes_as("C9", "leave");
         decodes_as("66 C9", "data16 leave");
         // TODO shift/rotate instrs
+        // TODO: `call` w/ destination
     }
 
     #[test]
@@ -794,6 +802,4 @@ mod tests {
             "66 66 66 66 66 66 66 66 66 66 66 66 66 66 66 99"
         ).unwrap_err();
     }
-
-    // TODO: `call` w/ destination
 }

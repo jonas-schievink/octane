@@ -372,7 +372,12 @@ impl<P: Printer> PrinterExt for P {
                 self.space();
                 self.print_operand(operand, ImmReprHint::Dec, true);
             }
+            Int { vector } => {
+                self.space();
+                self.print_immediate(&vector.to_string());
+            }
             Leave { .. }
+            | IntO
             | Stos { .. }
             | Cwd
             | Cdq => {},    // no operands
@@ -407,6 +412,8 @@ fn prefixes(instr: &Instr) -> Vec<&'static str> {
         | Idiv { .. }
         | Inc { .. }
         | Dec { .. }
+        | Int { .. }
+        | IntO
         | Cwd
         | Cdq => vec![],  // prefixes don't need display or are unsupported
         Stos { rep: true, .. } => vec!["rep"],
@@ -466,6 +473,8 @@ fn mnemonic(instr: &Instr) -> String {
             OpSize::Bits32 => "stosd",
         },
         Leave { .. } => "leave",
+        Int { .. } => "int",
+        IntO => "into",
         Cwd => "cwd",
         Cdq => "cdq",
     });
