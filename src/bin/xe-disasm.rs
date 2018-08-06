@@ -2,11 +2,11 @@ extern crate xe;
 extern crate xbe;
 extern crate env_logger;
 extern crate termcolor;
-//#[macro_use] extern crate log;
+#[macro_use] extern crate log;
 #[macro_use] extern crate structopt;
 
 use xe::cpu::decode::*;
-use xe::cpu::instr::{Instr, Operand};
+use xe::cpu::instr::{Instr, Operand, Addressing};
 use xe::cpu::disasm::{Printer, print_instr};
 use xe::loader;
 use xe::memory::{TableMemory, VirtualMemory};
@@ -134,7 +134,30 @@ impl<W: WriteColor> Printer for TermPrinter<W> {
     }
 }
 
-fn builtin<M: VirtualMemory>(opt: &Opt, mem: &M, start: u32, byte_count: u32) {
+/// Extracts helpful information for virtual address `addr`.
+fn addr_info(xbe: &Xbe, addr: u32) -> String {
+    // kernel function?
+    let thunk_tbl = xbe.kernel_thunk_table();
+    if addr >= thunk_tbl.virt_addr() && addr < thunk_tbl.virt_addr() + thunk_tbl.len() {
+        // find out which index
+        let offset = addr - thunk_tbl.virt_addr();
+        let index = offset / 4;
+        debug!("addr {:#010X} at thunk tbl offset {:#010X} index {}", addr, offset, index);
+
+        // this should never be out of bounds if thunk table info and decoding is correct
+        return thunk_tbl.import_ids()[index as usize].name().into();
+    }
+
+    let info = xbe.header().find_address_info(addr);
+    let info = match info.section() {
+        None => "(not statically mapped)".to_string(),
+        Some(section) => format!("(inside {})", section.name()),
+    };
+
+    info
+}
+
+fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_count: u32) {
     let mut printer = TermPrinter {
         w: StandardStream::stdout(ColorChoice::Auto),
         pc: start,
@@ -161,13 +184,13 @@ fn builtin<M: VirtualMemory>(opt: &Opt, mem: &M, start: u32, byte_count: u32) {
                 printer.print(COLOR_IMMEDIATE, &raw);
 
                 print_instr(&instr, &mut printer);
-                println!();
 
                 // track function extent and stop at the last `ret`
                 match instr {
                     Instr::Ret { .. } if max_jump_target < pc => {
                         // function ends here
                         if !opt.cont {
+                            println!();
                             break;
                         }
                     }
@@ -180,8 +203,21 @@ fn builtin<M: VirtualMemory>(opt: &Opt, mem: &M, start: u32, byte_count: u32) {
                             _ => {} // can't track indirect jumps
                         }
                     }
+                    // display the target for indirect calls where the target
+                    // addr. is at an abs. addr. in memory
+                    Instr::Call { target: Operand::Mem(mem) }
+                    | Instr::Mov { dest: Operand::Mem(mem), src: _ }
+                    | Instr::Mov { dest: _, src: Operand::Mem(mem) }
+                    | Instr::Push { operand: Operand::Mem(mem) } => {
+                        if let Addressing::Disp { base: None, disp } = mem.addressing {
+                            let info = addr_info(xbe, disp as u32);
+
+                            print!("\t{}", info);
+                        }
+                    }
                     _ => {}
                 }
+                println!();
 
                 let disassembled_bytes = dec.current_address() - start;
                 if disassembled_bytes >= byte_count {
@@ -240,7 +276,7 @@ fn main() -> Result<(), Box<Error>> {
             ndisasm(&opt, &mem, start, bytes)?;
         }
         Disassembler::Builtin => {
-            builtin(&opt, &mem, start, bytes);
+            builtin(&xbe, &opt, &mem, start, bytes);
         }
     }
 
