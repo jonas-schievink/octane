@@ -434,7 +434,15 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
         let default_size_bit = (byte & 0b01) != 0;      // false = 8 bit, true = 16/32 bit
 
         let instr = match byte {
-            0xB6 | 0xB7 => {
+            0xAF => {   // imul
+                let size = self.prefixes.size(true)?;
+                let modrm = self.read_modrm()?;
+                let dest = modrm.reg(size);
+                let src = self.read_addressing(modrm, size)?;
+
+                Instr::ImulTrunc { dest, src1: dest.into(), src2: src }
+            }
+            0xB6 | 0xB7 => {    // movzx
                 let src_size = if default_size_bit {
                     OpSize::Bits16
                 } else {
@@ -801,6 +809,7 @@ mod tests {
         decodes_as("C9", "leave");
         decodes_as("66 C9", "data16 leave");
         decodes_as("C7 45 F4 40 00 00 00", "mov [ebp-0xc],0x40");
+        decodes_as("0F AF 45 E8", "imul eax,[ebp-0x18]");
         // TODO shift/rotate instrs
         // TODO: `call` w/ destination
     }

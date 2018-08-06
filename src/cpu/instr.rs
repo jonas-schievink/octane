@@ -169,6 +169,8 @@ pub enum Instr {
     },
 
     /// Truncating `imul` with up to 3 operands.
+    ///
+    /// `dest = src1 * src2`.
     ImulTrunc {
         dest: Register,
         src1: Operand,
@@ -260,7 +262,7 @@ impl fmt::Display for Instr {
 ///
 /// This is mostly equivalent to an addressing mode (along with any data
 /// required by the addr. mode).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Operand {
     /// The operand is the value inside a register, or the register itself.
     Reg(Register),
@@ -411,7 +413,7 @@ pub enum OpSize {
 }
 
 /// An 8, 16 or 32-bit immediate value.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Immediate {
     Imm8(i8),
     Imm16(i16),
