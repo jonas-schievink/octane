@@ -221,6 +221,21 @@ pub enum Instr {
     ///
     /// Does not read or modify any flags.
     Cdq,
+
+    /// Remove the procedure's stack frame.
+    ///
+    /// Equivalent to:
+    ///
+    /// ```notrust
+    /// mov esp, ebp
+    /// pop ebp
+    /// ```
+    ///
+    /// With a 16-bit operand size, the `pop ebp` instead becomes `pop bp`.
+    Leave {
+        /// Whether to pop `ebp` or `bp` (32-bit / 16-bit operand size).
+        size: OpSize,
+    },
 }
 
 impl fmt::Display for Instr {

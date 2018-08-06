@@ -270,6 +270,15 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 Instr::Shift { op, dest, src }
             }
+            0xC9 => {
+                let size = if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
+                    OpSize::Bits16
+                } else {
+                    OpSize::Bits32
+                };
+
+                Instr::Leave { size }
+            }
             0xE8 => {
                 // call with eip-relative offset (FIXME can be 16-bit)
                 let offset = self.read_i32()?;
@@ -770,6 +779,8 @@ mod tests {
         decodes_as("C1 E9 02", "shr ecx,2");
         decodes_as("FF 74 24 04", "push dword [esp+0x4]");
         decodes_as("F3 AB", "rep stosd");
+        decodes_as("C9", "leave");
+        decodes_as("66 C9", "data16 leave");
         // TODO shift/rotate instrs
     }
 

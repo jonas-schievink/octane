@@ -372,7 +372,8 @@ impl<P: Printer> PrinterExt for P {
                 self.space();
                 self.print_operand(operand, ImmReprHint::Dec, true);
             }
-            Stos { .. }
+            Leave { .. }
+            | Stos { .. }
             | Cwd
             | Cdq => {},    // no operands
         }
@@ -410,6 +411,8 @@ fn prefixes(instr: &Instr) -> Vec<&'static str> {
         | Cdq => vec![],  // prefixes don't need display or are unsupported
         Stos { rep: true, .. } => vec!["rep"],
         Stos { rep: false, .. } => vec![],
+        Leave { size: OpSize::Bits16 } => vec!["data16"],
+        Leave { size: _ } => vec![],
     }
 }
 
@@ -462,6 +465,7 @@ fn mnemonic(instr: &Instr) -> String {
             OpSize::Bits16 => "stosw",
             OpSize::Bits32 => "stosd",
         },
+        Leave { .. } => "leave",
         Cwd => "cwd",
         Cdq => "cdq",
     });
