@@ -261,6 +261,10 @@ impl<P: Printer> PrinterExt for P {
     fn print_instr(&mut self, instr: &Instr) {
         use cpu::instr::Instr::*;
 
+        for prefix in prefixes(instr) {
+            self.print_mnemonic(prefix);
+            self.space();
+        }
         self.print_mnemonic(&mnemonic(&instr));
 
         match instr {
@@ -368,10 +372,44 @@ impl<P: Printer> PrinterExt for P {
                 self.space();
                 self.print_operand(operand, ImmReprHint::Dec, true);
             }
-            Cwd | Cdq => {},    // no operands
+            Stos { .. }
+            | Cwd
+            | Cdq => {},    // no operands
         }
 
         self.done();
+    }
+}
+
+fn prefixes(instr: &Instr) -> Vec<&'static str> {
+    use cpu::instr::Instr::*;
+
+    match instr {
+        Alu { .. }
+        | Shift { .. }
+        | Mov { .. }
+        | MovZx { .. }
+        | JumpIf { .. }
+        | Jump { .. }
+        | Call { .. }
+        | Ret { .. }
+        | Push { .. }
+        | Pop { .. }
+        | Lea { .. }
+        | Test { .. }
+        | Not { .. }
+        | Neg { .. }
+        | Mul { .. }
+        | Imul { .. }
+        | ImulTrunc { .. }
+        | Div { .. }
+        | Idiv { .. }
+        | Inc { .. }
+        | Dec { .. }
+        | Cwd
+        | Cdq => vec![],  // prefixes don't need display or are unsupported
+        Stos { rep: true, .. } => vec!["rep"],
+        Stos { rep: false, .. } => vec![],
     }
 }
 
@@ -419,6 +457,11 @@ fn mnemonic(instr: &Instr) -> String {
         Idiv { .. } => "idiv",
         Inc { .. } => "inc",
         Dec { .. } => "dec",
+        Stos { size, rep: _ } => match size {
+            OpSize::Bits8 => "stosb",
+            OpSize::Bits16 => "stosw",
+            OpSize::Bits32 => "stosd",
+        },
         Cwd => "cwd",
         Cdq => "cdq",
     });

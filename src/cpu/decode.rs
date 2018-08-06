@@ -352,6 +352,12 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 Instr::ImulTrunc { dest, src1, src2 }
             }
+            0xAA | 0xAB => {    // stos (stosb, stosw, stosd)
+                let size = self.prefixes.size(default_size_bit)?;
+                let rep = self.prefixes.take(PrefixFlags::REP_REPE);
+
+                Instr::Stos { rep, size }
+            }
             0xFF => {
                 // Inc/Dec/Push group 4
                 let size = if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
@@ -763,6 +769,7 @@ mod tests {
         decodes_as("85 C0", "test eax,eax");
         decodes_as("C1 E9 02", "shr ecx,2");
         decodes_as("FF 74 24 04", "push dword [esp+0x4]");
+        decodes_as("F3 AB", "rep stosd");
         // TODO shift/rotate instrs
     }
 

@@ -192,6 +192,22 @@ pub enum Instr {
         operand: Operand,
     },
 
+    /// Store string.
+    ///
+    /// Stores `AL`, `AX` or `EAX` into `es:edi` or `es:di`. Segment override
+    /// prefixes are not allowed.
+    ///
+    /// After a value is stored, `di`/`edi` is incremented by the number of
+    /// bytes stored if the `DF` flag is 0, and decremented if it's 1.
+    Stos {
+        /// Whether a `rep` prefix is present.
+        ///
+        /// This will perform the operation as many times as specified in
+        /// `CX`/`ECX`, decrementing its value each time.
+        rep: bool,
+        size: OpSize,
+    },
+
     /// Convert Word to Double word.
     ///
     /// Write the most significant bit of `AX` into all of `DX`.
