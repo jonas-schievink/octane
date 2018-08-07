@@ -182,12 +182,12 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 // push or pop 16- or 32-bit register
                 let pop = byte & 0b0000_1000 != 0;
                 let size = self.prefixes.size(true)?; // default 32-bit
-                let reg = ModRegRm::conv_reg(byte & 0b111, size);
+                let operand = ModRegRm::conv_reg(byte & 0b111, size).into();
 
                 if pop {
-                    Instr::Pop { reg }
+                    Instr::Pop { operand }
                 } else {
-                    Instr::Push { operand: reg.into() }
+                    Instr::Push { operand }
                 }
             }
             _ if bitpat!(0 1 0 0 _ _ _ _)(byte) => {  // 0x4_
@@ -243,6 +243,20 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 let rhs = modrm.reg(size).into();
 
                 Instr::Test { lhs, rhs }
+            }
+            0x8F => {  // pop r/m16/32
+                let size = if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
+                    OpSize::Bits16
+                } else {
+                    OpSize::Bits32
+                };
+                let modrm = self.read_modrm()?;
+                if modrm.reg_raw() != 0 {
+                    return Err(DecoderError::ud(format!("0x8F with non-0 Reg field")));
+                }
+                let operand = self.read_addressing(modrm, size)?;
+
+                Instr::Pop { operand }
             }
             _ if bitpat!(1 1 0 0 0 0 0 _)(byte) || bitpat!(1 1 0 1 0 0 _ _)(byte) => {    // C0 / C1 / D0-D3
                 // shift group 2
@@ -892,6 +906,7 @@ mod tests {
         decodes_as("64 0F B6 05 24 00 00 00", "movzx eax,byte [fs:0x24]");
         decodes_as("64 0F BE 05 24 00 00 00", "movsx eax,byte [fs:0x24]");
         decodes_as("A8 82", "test al,0x82");
+        decodes_as("64 8F 05 00 00 00 00", "pop dword [fs:0x0]");
         // TODO shift/rotate instrs
         // TODO: `call` w/ destination
     }

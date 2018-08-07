@@ -117,14 +117,15 @@ pub enum Instr {
         operand: Operand,
     },
 
-    /// Pop a 16- or 32-bit value from the stack into a register.
+    /// Pop a 16- or 32-bit value from the stack into a register or memory
+    /// location.
     ///
     /// First, a value of the right size (2 or 4 bytes) is read from the address
     /// in `ESP`. Then, `ESP` is incremented by that size.
     ///
     /// Does not read or modify any flags.
     Pop {
-        reg: Register,
+        operand: Operand,
     },
 
     /// Load Effective Address.

@@ -331,9 +331,9 @@ impl<P: Printer> PrinterExt for P {
                 self.space();
                 self.print_operand(operand, ImmReprHint::Hex, true);
             }
-            Pop { reg } => {
+            Pop { operand } => {
                 self.space();
-                self.print_register(reg.name());
+                self.print_operand(operand, ImmReprHint::Dec, true);
             }
             Lea { dest, src } => {
                 self.space();
