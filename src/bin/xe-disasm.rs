@@ -164,7 +164,7 @@ fn addr_info(xbe: &Xbe, addr: u32) -> String {
 }
 
 // returns the list of callees of this function
-fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_count: u32) -> Vec<u32> {
+fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_count: u32) -> HashSet<u32> {
     let mut printer = TermPrinter {
         w: StandardStream::stdout(ColorChoice::Auto),
         pc: start,
@@ -180,7 +180,7 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
 
     let mut dec = Decoder::new(mem, start);
     let mut max_jump_target = start;
-    let mut callees = Vec::new();
+    let mut callees = HashSet::new();
     loop {
         let pc_before = dec.current_address();
         let result = dec.decode_next();
@@ -203,7 +203,7 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
 
                 if let Instr::Call { target: Operand::Imm(imm) } = &instr {
                     // calls to fixed callees can be followed
-                    callees.push(imm.zero_extended());
+                    callees.insert(imm.zero_extended());
                 }
 
                 // track function extent and stop at the last `ret`
@@ -319,7 +319,7 @@ fn main() -> Result<(), Box<Error>> {
             while opt.follow_calls && !callees.is_empty() {
                 let new_callees = callees.iter().flat_map(|callee| {
                     if all_callees.contains(callee) {
-                        vec![]
+                        HashSet::new()  // don't add any callees
                     } else {
                         builtin(&xbe, &opt, &mem, *callee, u32::MAX)
                     }
