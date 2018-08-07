@@ -379,6 +379,18 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 Instr::StrMem { op: StrMemOp::Movs, rep, size }
             }
+            // A6-A7 = cmps
+            0xA8 | 0xA9 => {    // test al/ax/eax
+                let size = self.prefixes.size(default_size_bit)?;
+                let rhs = self.read_immediate(size)?.into();
+                let lhs = match size {
+                    OpSize::Bits8 => Register::Al,
+                    OpSize::Bits16 => Register::Ax,
+                    OpSize::Bits32 => Register::Eax,
+                }.into();
+
+                Instr::Test { lhs, rhs }
+            }
             0xAA | 0xAB => {    // stos (stosb, stosw, stosd)
                 let size = self.prefixes.size(default_size_bit)?;
                 let rep = self.prefixes.take(PrefixFlags::REP_REPE);
@@ -879,6 +891,7 @@ mod tests {
         decodes_as("FF 24 85 C1 D7 15 00", "jmp dword [eax*4+0x15d7c1]");
         decodes_as("64 0F B6 05 24 00 00 00", "movzx eax,byte [fs:0x24]");
         decodes_as("64 0F BE 05 24 00 00 00", "movsx eax,byte [fs:0x24]");
+        decodes_as("A8 82", "test al,0x82");
         // TODO shift/rotate instrs
         // TODO: `call` w/ destination
     }
