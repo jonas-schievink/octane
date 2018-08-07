@@ -22,6 +22,7 @@ use std::io::Write;
 use std::fmt::Write as _Write;
 use std::str::FromStr;
 use std::num::ParseIntError;
+use std::collections::HashSet;
 
 /// Parse a number that might be hexadecimal.
 fn parse_hex(src: &str) -> Result<u32, ParseIntError> {
@@ -214,6 +215,15 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
                             break;
                         }
                     }
+                    Instr::Jump { target: Operand::Imm(imm) }
+                    if imm.zero_extended() < pc && max_jump_target < pc => {
+                        // unconditional backwards jump as last instr =
+                        // function ends here
+                        if !opt.cont {
+                            println!();
+                            break;
+                        }
+                    }
                     Instr::Jump { target, .. } | Instr::JumpIf { target, ..} => {
                         match target {
                             Operand::Imm(target) => {
@@ -304,9 +314,18 @@ fn main() -> Result<(), Box<Error>> {
         }
         Disassembler::Builtin => {
             // FIXME might be nice to print the call stack
+            let mut all_callees = HashSet::<u32>::new();
             let mut callees = builtin(&xbe, &opt, &mem, start, bytes);
             while opt.follow_calls && !callees.is_empty() {
-                callees = callees.iter().flat_map(|callee| builtin(&xbe, &opt, &mem, *callee, u32::MAX)).collect();
+                let new_callees = callees.iter().flat_map(|callee| {
+                    if all_callees.contains(callee) {
+                        vec![]
+                    } else {
+                        builtin(&xbe, &opt, &mem, *callee, u32::MAX)
+                    }
+                }).collect();
+                all_callees.extend(callees.iter().cloned());
+                callees = new_callees;
             }
         }
     }
