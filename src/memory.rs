@@ -17,14 +17,11 @@
 
 use memmap::MmapMut;
 
-use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 use std::error::Error;
 use std::{fmt, ptr, u32};
 
 pub trait VirtualMemory {
-    fn load(&self, virt_addr: u32) -> Result<u8, MemoryError>;
-
     /// Maps a block of data into the virtual address space.
     ///
     /// It is an error to call this when `virt_range` overlaps an already mapped
@@ -33,6 +30,8 @@ pub trait VirtualMemory {
     /// If `data` is too small to fill the entire virtual range, it is padded
     /// with 0 bytes.
     fn add_mapping(&mut self, virt_range: RangeInclusive<u32>, data: &[u8]) -> Result<(), MapError>;
+
+    fn load(&self, virt_addr: u32) -> Result<u8, MemoryError>;
 
     fn load_i32(&self, virt_addr: u32) -> Result<i32, MemoryError> {
         let (b0, b1, b2, b3) = (
@@ -63,67 +62,8 @@ pub trait VirtualMemory {
     }
 }
 
-/// Very slow memory implementation that stores mapped data in tables.
-#[derive(Debug)]
-pub struct TableMemory {
-    /// Maps start addresses of virtual memory blocks to statically mapped
-    /// sections loaded from the XBE.
-    static_map: BTreeMap<u32, Box<[u8]>>,
-}
-
-impl TableMemory {
-    /// Creates a new, empty table-based virtual memory.
-    pub fn new() -> Self {
-        Self {
-            static_map: BTreeMap::new(),
-        }
-    }
-
-    fn entries_overlapping(&self, virt_range: RangeInclusive<u32>) -> impl Iterator<Item=(u32, &[u8])> {
-        self.static_map.range(virt_range.clone())   // overlaps definitely
-            .chain(self.static_map.range(.. *virt_range.start())
-                .next_back()
-                .filter(|(start, data)| *start + (data.len() as u32) >= *virt_range.start())
-            )
-            .map(|(start, data)| (*start, &**data))
-    }
-}
-
-impl VirtualMemory for TableMemory {
-    fn load(&self, virt_addr: u32) -> Result<u8, MemoryError> {
-        let (start, bytes) = self.entries_overlapping(virt_addr..=virt_addr)
-            .next()
-            .ok_or_else(|| MemoryError::Fault)?;    // not mapped?
-
-        let entry_range = start ..= start + (bytes.len() as u32);
-        debug!("load {:#010X}: found entry spanning {:#010X}..={:#010X}", virt_addr, entry_range.start(), entry_range.end());
-
-        if *entry_range.end() < virt_addr {
-            return Err(MemoryError::Fault);
-        }
-
-        Ok(bytes[(virt_addr - start) as usize])
-    }
-
-    fn add_mapping(&mut self, virt_range: RangeInclusive<u32>, data: &[u8]) -> Result<(), MapError> {
-        if *virt_range.end() >= 0x8000_0000 {
-            return Err(MapError::KernelSpace);
-        }
-
-        if self.entries_overlapping(virt_range.clone()).next().is_some() {
-            return Err(MapError::Overlap);
-        }
-
-        let mut vec = data.to_vec();
-        let virt_len = virt_range.end() - virt_range.start() + 1;
-        vec.resize(virt_len as usize, 0);
-        self.static_map.insert(*virt_range.start(), data.to_vec().into_boxed_slice());
-
-        Ok(())
-    }
-}
-
-/// A virtual memory implementation that stores everything in a `Vec`.
+/// A static, contiguous virtual memory implementation that stores everything in
+/// a `Vec`.
 ///
 /// This is mostly useful for tests and benchmarks.
 #[derive(Debug)]
@@ -144,12 +84,12 @@ impl ArrayMemory {
 }
 
 impl VirtualMemory for ArrayMemory {
-    fn load(&self, virt_addr: u32) -> Result<u8, MemoryError> {
-        self.mem.get(virt_addr as usize).cloned().ok_or(MemoryError::Fault)
-    }
-
     fn add_mapping(&mut self, _: RangeInclusive<u32>, _: &[u8]) -> Result<(), MapError> {
         unimplemented!("ArrayMemory is static - `add_mapping` will not work")
+    }
+
+    fn load(&self, virt_addr: u32) -> Result<u8, MemoryError> {
+        self.mem.get(virt_addr as usize).cloned().ok_or(MemoryError::Fault)
     }
 }
 
@@ -174,12 +114,6 @@ impl MmapMemory {
 }
 
 impl VirtualMemory for MmapMemory {
-    fn load(&self, virt_addr: u32) -> Result<u8, MemoryError> {
-        // unchecked indexing possible since we map the whole 4G
-        let val = unsafe { self.mapping.get_unchecked(virt_addr as usize) };
-        Ok(*val)
-    }
-
     fn add_mapping(&mut self, virt_range: RangeInclusive<u32>, data: &[u8]) -> Result<(), MapError> {
         if *virt_range.end() >= 0x8000_0000 {
             return Err(MapError::KernelSpace);
@@ -194,6 +128,12 @@ impl VirtualMemory for MmapMemory {
         self.mapping[range].copy_from_slice(&vec);
 
         Ok(())
+    }
+
+    fn load(&self, virt_addr: u32) -> Result<u8, MemoryError> {
+        // unchecked indexing possible since we map the whole 4G
+        let val = unsafe { self.mapping.get_unchecked(virt_addr as usize) };
+        Ok(*val)
     }
 
     fn load_i32(&self, virt_addr: u32) -> Result<i32, MemoryError> {

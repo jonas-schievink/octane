@@ -9,7 +9,7 @@ use xe::cpu::decode::*;
 use xe::cpu::instr::{Instr, Operand, Addressing};
 use xe::cpu::disasm::{Printer, print_instr};
 use xe::loader;
-use xe::memory::{TableMemory, VirtualMemory};
+use xe::memory::{MmapMemory, VirtualMemory};
 use xbe::Xbe;
 
 use structopt::StructOpt;
@@ -296,7 +296,7 @@ fn main() -> Result<(), Box<Error>> {
     let xbe = Xbe::parse(&contents)?;
     eprintln!("opened '{}'", xbe.title_name());
 
-    let mut mem = TableMemory::new();
+    let mut mem = MmapMemory::new();
     loader::load(&xbe, &mut mem)?;
 
     let tool = opt.tool.unwrap_or(Disassembler::Builtin);
