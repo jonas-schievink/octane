@@ -5,6 +5,8 @@ use std::error::Error;
 use std::fmt;
 
 pub fn load<M: VirtualMemory>(xbe: &Xbe, mem: &mut M) -> Result<(), LoaderError> {
+    // FIXME the whole XBE needs to be mapped at its base address, not just its sections
+
     // FIXME we probably want the xbe crate to check that no sections overlap
     // FIXME while we're at it, we need a way to display the virtual addr. space like glibc does
     for section in xbe.sections() {
