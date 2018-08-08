@@ -386,6 +386,12 @@ impl<P: Printer> PrinterExt for P {
                 self.space();
                 self.print_immediate(&port.to_string());
             }
+            BitScan { dest, src, .. } => {
+                self.space();
+                self.print_register(dest.name());
+                self.print_symbols(",");
+                self.print_operand(src, ImmReprHint::Hex, false);   // src is register
+            }
             Leave { .. }
             | IntO
             | StrMem { .. }
@@ -425,6 +431,7 @@ fn prefixes(instr: &Instr) -> Vec<&'static str> {
         | Inc { .. }
         | Dec { .. }
         | Int { .. }
+        | BitScan { .. }
         | IntO
         | Cwd
         | Cdq => vec![],  // prefixes don't need display or are unsupported
@@ -496,6 +503,8 @@ fn mnemonic(instr: &Instr) -> String {
             });
             return s;
         },
+        BitScan { reverse: false, .. } => "bsf",
+        BitScan { reverse: true, .. } => "bsr",
         Leave { .. } => "leave",
         Int { .. } => "int",
         IntO => "into",

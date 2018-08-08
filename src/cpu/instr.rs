@@ -230,6 +230,16 @@ pub enum Instr {
         vector: u8,
     },
 
+    /// Determine the bit index of the least or most significant bit set in the
+    /// operand.
+    BitScan {
+        /// If `true`, search for the most significant set bit. If `false`, find
+        /// the least significant bit.
+        reverse: bool,
+        dest: Register,
+        src: Operand,
+    },
+
     /// Raise interrupt 4 if overflow flag is set.
     IntO,
 

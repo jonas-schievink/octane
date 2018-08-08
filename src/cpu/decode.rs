@@ -530,6 +530,20 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 Instr::MovZx { dest, src }
             }
+            0xBC | 0xBD => {
+                // Bit Scan (Forward/Reverse)
+                let reverse = byte == 0xBD;
+                let size = if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
+                    OpSize::Bits16
+                } else {
+                    OpSize::Bits32
+                };
+                let modrm = self.read_modrm()?;
+                let dest = modrm.reg(size);
+                let src = self.read_addressing(modrm, size)?;
+
+                Instr::BitScan { reverse, dest, src }
+            }
             0xBE | 0xBF => {    // movsx
                 let src_size = if default_size_bit {
                     OpSize::Bits16
@@ -920,6 +934,7 @@ mod tests {
         decodes_as("A8 82", "test al,0x82");
         decodes_as("64 8F 05 00 00 00 00", "pop dword [fs:0x0]");
         decodes_as("FE 45 0F", "inc byte [ebp+0xf]");
+        decodes_as("0F BC C1", "bsf eax,ecx");
         // TODO shift/rotate instrs
         // TODO: `call` w/ destination
     }
