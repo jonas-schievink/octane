@@ -411,8 +411,20 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 Instr::StrMem { op: StrMemOp::Stos, rep, size }
             }
+            0xFE => {
+                // Inc/Dec group 4
+                let size = OpSize::Bits8;
+                let modrm = self.read_modrm()?;
+                let operand = self.read_addressing(modrm, size)?;
+
+                match modrm.reg_raw() {
+                    0 => Instr::Inc { operand },
+                    1 => Instr::Dec { operand },
+                    ud => return Err(DecoderError::ud(format!("0xFE group with opcode {}", ud))),
+                }
+            }
             0xFF => {
-                // Inc/Dec/Push group 4
+                // Inc/Dec/Push group 5
                 let size = if self.prefixes.take(PrefixFlags::OVERRIDE_OPERAND) {
                     OpSize::Bits16
                 } else {
@@ -907,6 +919,7 @@ mod tests {
         decodes_as("64 0F BE 05 24 00 00 00", "movsx eax,byte [fs:0x24]");
         decodes_as("A8 82", "test al,0x82");
         decodes_as("64 8F 05 00 00 00 00", "pop dword [fs:0x0]");
+        decodes_as("FE 45 0F", "inc byte [ebp+0xf]");
         // TODO shift/rotate instrs
         // TODO: `call` w/ destination
     }
