@@ -163,7 +163,7 @@ pub enum MemoryError {
 
 impl fmt::Display for MemoryError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "memory error")
+        write!(f, "memory access error")
     }
 }
 
