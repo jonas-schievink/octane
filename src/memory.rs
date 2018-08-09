@@ -15,11 +15,15 @@
 // TODO: Revisit this and document the memory layout used by Windows NT on the Xbox
 // no segmentation, flat virtual memory space, except the custom segment registers for the TIB
 
+// TODO: This doesn't model permissions right now, but at least the mmap-based
+// impl easily could
+
 use memmap::MmapMut;
 
+use std::{fmt, ptr, iter, u32};
 use std::ops::RangeInclusive;
 use std::error::Error;
-use std::{fmt, ptr, u32};
+use std::borrow::Cow;
 
 pub trait VirtualMemory {
     /// Maps a block of data into the virtual address space.
@@ -29,7 +33,24 @@ pub trait VirtualMemory {
     ///
     /// If `data` is too small to fill the entire virtual range, it is padded
     /// with 0 bytes.
-    fn add_mapping(&mut self, virt_range: RangeInclusive<u32>, data: &[u8]) -> Result<(), MapError>;
+    ///
+    /// # Parameters
+    ///
+    /// * `virt_range`: The virtual memory range where the data should be mapped.
+    /// * `data`: The data to map into the virtual address space.
+    /// * `name`: Debug name of the mapping. This can be the section name, or
+    ///   for special areas a string like `<stack>`.
+    fn add_mapping(&mut self, virt_range: RangeInclusive<u32>, data: &[u8], name: &str) -> Result<(), MapError>;
+
+    /// Returns an iterator over all currently installed memory mappings.
+    fn mappings(&self) -> Mappings;
+
+    /// Determines the mapping the given address is a part of.
+    fn mapping_containing_addr(&self, virt_addr: u32) -> Option<Mapping> {
+        self.mappings().find(|mapping| {
+            *mapping.virt_range().start() <= virt_addr && *mapping.virt_range().end() >= virt_addr
+        })
+    }
 
     fn load(&self, virt_addr: u32) -> Result<u8, MemoryError>;
 
@@ -62,6 +83,61 @@ pub trait VirtualMemory {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Mapping<'a> {
+    virt_range: RangeInclusive<u32>,
+    name: Cow<'a, str>,
+}
+
+impl<'a> Mapping<'a> {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn virt_range(&self) -> RangeInclusive<u32> {
+        self.virt_range.clone()
+    }
+}
+
+impl<'a> fmt::Display for Mapping<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let (start, end) = (self.virt_range.start(), self.virt_range.end());
+        write!(f, "{:08X}-{:08X} {}", start, end, self.name)
+    }
+}
+
+/// Iterator over memory mappings.
+#[allow(missing_debug_implementations)] // annoying to do here
+pub struct Mappings<'a> {
+    inner: Box<Iterator<Item=Mapping<'a>> + 'a>,
+}
+
+impl<'a> Mappings<'a> {
+    fn empty() -> Self {
+        Self {
+            inner: Box::new(iter::empty()),
+        }
+    }
+
+    fn new<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item=Mapping<'a>>,
+        I::IntoIter: 'a
+    {
+        Self {
+            inner: Box::new(iter.into_iter()),
+        }
+    }
+}
+
+impl<'a> Iterator for Mappings<'a> {
+    type Item = Mapping<'a>;
+
+    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
+        self.inner.next()
+    }
+}
+
 /// A static, contiguous virtual memory implementation that stores everything in
 /// a `Vec`.
 ///
@@ -84,8 +160,12 @@ impl ArrayMemory {
 }
 
 impl VirtualMemory for ArrayMemory {
-    fn add_mapping(&mut self, _: RangeInclusive<u32>, _: &[u8]) -> Result<(), MapError> {
+    fn add_mapping(&mut self, _: RangeInclusive<u32>, _: &[u8], _: &str) -> Result<(), MapError> {
         unimplemented!("ArrayMemory is static - `add_mapping` will not work")
+    }
+
+    fn mappings(&self) -> Mappings {
+        Mappings::empty()
     }
 
     fn load(&self, virt_addr: u32) -> Result<u8, MemoryError> {
@@ -96,6 +176,7 @@ impl VirtualMemory for ArrayMemory {
 #[derive(Debug)]
 pub struct MmapMemory {
     mapping: MmapMut,
+    mappings: Vec<Mapping<'static>>,
 }
 
 impl MmapMemory {
@@ -103,6 +184,7 @@ impl MmapMemory {
         Self {
             mapping: MmapMut::map_anon(u32::MAX as usize)
                 .expect("could not map memory"),
+            mappings: Vec::new(),
         }
     }
 
@@ -114,7 +196,7 @@ impl MmapMemory {
 }
 
 impl VirtualMemory for MmapMemory {
-    fn add_mapping(&mut self, virt_range: RangeInclusive<u32>, data: &[u8]) -> Result<(), MapError> {
+    fn add_mapping(&mut self, virt_range: RangeInclusive<u32>, data: &[u8], name: &str) -> Result<(), MapError> {
         if *virt_range.end() >= 0x8000_0000 {
             return Err(MapError::KernelSpace);
         }
@@ -127,7 +209,16 @@ impl VirtualMemory for MmapMemory {
         let range = *virt_range.start() as usize ..= *virt_range.end() as usize;
         self.mapping[range].copy_from_slice(&vec);
 
+        self.mappings.push(Mapping {
+            virt_range,
+            name: name.to_owned().into(),
+        });
+
         Ok(())
+    }
+
+    fn mappings(&self) -> Mappings {
+        Mappings::new(self.mappings.iter().cloned())
     }
 
     fn load(&self, virt_addr: u32) -> Result<u8, MemoryError> {

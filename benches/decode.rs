@@ -66,7 +66,7 @@ fn decode_limp_ninja_demoplayer(c: &mut Criterion) {
     // We use mmap-base memory to avoid bounds checks (like we expect the
     // emulator to later do). They can take up a lot of time.
     let mut mem = MmapMemory::new();
-    mem.add_mapping(0..=bytes, &data).unwrap();
+    mem.add_mapping(0..=bytes, &data, ".text").unwrap();
 
     c.bench("decode", Benchmark::new("limp ninja demoplayer", move |b| {
         b.iter(|| {
