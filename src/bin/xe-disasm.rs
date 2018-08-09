@@ -239,6 +239,7 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
                     | Instr::Mov { dest: Operand::Mem(m), src: _ }
                     | Instr::Mov { dest: _, src: Operand::Mem(m) }
                     | Instr::Push { operand: Operand::Mem(m) } => {
+                        // FIXME visit *all* instrs this way, probably writing a visitor
                         // we can only be helpful if the access uses a flat
                         // address space
                         if !m.base_segment.may_be_used() {
