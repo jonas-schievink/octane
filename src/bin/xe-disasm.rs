@@ -154,7 +154,7 @@ fn addr_info(xbe: &Xbe, addr: u32) -> String {
         return thunk_tbl.import_ids()[index as usize].name().into();
     }
 
-    let info = xbe.header().find_address_info(addr);
+    let info = xbe.find_address_info(addr);
     let info = match info.section() {
         None => "(not statically mapped)".to_string(),
         Some(section) => format!("(inside {})", section.name()),
@@ -171,8 +171,7 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
     };
 
     printer.print(COLOR_ADDR, &format!("{:08X}  ", start));
-    let section = xbe.header()
-        .find_section_containing(start)
+    let section = xbe.find_section_containing(start)
         .map(|sec| sec.name())
         .unwrap_or("<unmapped>");
     printer.print_symbols(&format!("disassembly start (in section '{}')", section));
