@@ -141,7 +141,7 @@ impl<W: WriteColor> Printer for TermPrinter<W> {
 }
 
 /// Extracts helpful information for virtual address `addr`.
-fn addr_info(xbe: &Xbe, addr: u32) -> String {
+fn addr_info<M: VirtualMemory>(xbe: &Xbe, mem: &M, addr: u32) -> String {
     // kernel function?
     let thunk_tbl = xbe.kernel_thunk_table();
     if addr >= thunk_tbl.virt_addr() && addr < thunk_tbl.virt_addr() + thunk_tbl.len() {
@@ -154,13 +154,14 @@ fn addr_info(xbe: &Xbe, addr: u32) -> String {
         return thunk_tbl.import_ids()[index as usize].name().into();
     }
 
-    let info = xbe.find_address_info(addr);
-    let info = match info.section() {
-        None => "(not statically mapped)".to_string(),
-        Some(section) => format!("(inside {})", section.name()),
-    };
-
-    info
+    match mem.mapping_containing_addr(addr) {
+        Some(mapping) => {
+            let start = *mapping.virt_range().start();
+            let offset = addr - start;
+            format!("({:#X} bytes into '{}')", offset, mapping.name())
+        }
+        None => "(not mapped)".to_string(),
+    }
 }
 
 // returns the list of callees of this function
@@ -234,16 +235,16 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
                     }
                     // display the target for indirect calls where the target
                     // addr. is at an abs. addr. in memory
-                    Instr::Call { target: Operand::Mem(mem) }
-                    | Instr::Mov { dest: Operand::Mem(mem), src: _ }
-                    | Instr::Mov { dest: _, src: Operand::Mem(mem) }
-                    | Instr::Push { operand: Operand::Mem(mem) } => {
+                    Instr::Call { target: Operand::Mem(m) }
+                    | Instr::Mov { dest: Operand::Mem(m), src: _ }
+                    | Instr::Mov { dest: _, src: Operand::Mem(m) }
+                    | Instr::Push { operand: Operand::Mem(m) } => {
                         // we can only be helpful if the access uses a flat
                         // address space
-                        if !mem.base_segment.may_be_used() {
+                        if !m.base_segment.may_be_used() {
                             // ...and if the access has a fixed, abs. address
-                            if let Addressing::Disp { base: None, disp } = mem.addressing {
-                                let info = addr_info(xbe, disp as u32);
+                            if let Addressing::Disp { base: None, disp } = m.addressing {
+                                let info = addr_info(xbe, mem, disp as u32);
 
                                 print!("\t{}", info);
                             }
