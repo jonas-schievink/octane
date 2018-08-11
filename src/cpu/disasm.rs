@@ -2,6 +2,10 @@
 
 use cpu::instr::*;
 use cpu::visit::{self, Visitor};
+use memory::VirtualMemory;
+
+use xbe::Xbe;
+use std::cmp;
 
 /// Trait for assembly printing contexts.
 ///
@@ -463,6 +467,7 @@ impl<'a, A: AsmPrinter> Visitor for Disassembler<'a, A> {
     }
 }
 
+/// Prints the disassembly of an x86 instruction.
 pub fn print_instr<P: AsmPrinter>(instr: &Instr, p: &mut P) {
     Disassembler {
         printer: p,
@@ -471,4 +476,139 @@ pub fn print_instr<P: AsmPrinter>(instr: &Instr, p: &mut P) {
         is_rel_jump: false,
         imm_fmt: ImmReprHint::Hex,
     }.visit_instr(instr);
+}
+
+/// An instruction visitor that obtains helpful information for memory addresses
+/// from initialized `VirtualMemory`.
+#[derive(Debug)]
+pub struct MemHelper<'a, M: VirtualMemory + 'a> {
+    xbe: &'a Xbe<'a>,
+    mem: &'a M,
+    info: Option<String>,
+}
+
+impl<'a, M: VirtualMemory> MemHelper<'a, M> {
+    /// Create a new `MemHelper`.
+    ///
+    /// # Parameters
+    ///
+    /// * `xbe`: The parsed XBE file to consult regarding kernel functions.
+    /// * `mem`: The virtual memory of the process to consult for section names.
+    pub fn new(xbe: &'a Xbe<'a>, mem: &'a M) -> Self {
+        // FIXME: This can probably work without the XBE
+        Self {
+            xbe,
+            mem,
+            info: None,
+        }
+    }
+
+    /// Obtain section/kernel function help for the memory accessed by `instr`.
+    ///
+    /// Returns `None` if `instr` doesn't access memory.
+    pub fn obtain_info(&mut self, instr: &Instr) -> Option<String> {
+        self.visit_instr(instr);
+        self.info.take()
+    }
+
+    fn addr_info(&self, addr: u32) -> String {
+        // kernel function?
+        let thunk_tbl = self.xbe.kernel_thunk_table();
+        if addr >= thunk_tbl.virt_addr() && addr < thunk_tbl.virt_addr() + thunk_tbl.len() {
+            // find out which index
+            let offset = addr - thunk_tbl.virt_addr();
+            let index = offset / 4;
+            debug!("addr {:#010X} at thunk tbl offset {:#010X} index {}", addr, offset, index);
+
+            // this should never be out of bounds if thunk table info and decoding is correct
+            return thunk_tbl.import_ids()[index as usize].name().into();
+        }
+
+        match self.mem.mapping_containing_addr(addr) {
+            Some(mapping) => {
+                let start = *mapping.virt_range().start();
+                let offset = addr - start;
+                format!("({:#X} bytes into '{}')", offset, mapping.name())
+            }
+            None => "(not mapped)".to_string(),
+        }
+    }
+}
+
+impl<'a, M: VirtualMemory> Visitor for MemHelper<'a, M> {
+    fn visit_memory_location(&mut self, loc: &MemoryLocation) {
+        // we can only be helpful if the access uses a flat address space
+        // (but maybe we can also print the TIB field of the access!)
+        if !loc.base_segment.may_be_used() {
+            // ...and if the access has a fixed, absolute address
+            // (aka "displacement-only")
+            if let Addressing::Disp { base: None, disp } = loc.addressing {
+                self.info = Some(self.addr_info(disp as u32));
+            }
+            // maybe it's a good idea to also do this with the *base* address
+        }
+    }
+}
+
+/// An instruction visitor that will calculate the maximum extent of a function.
+///
+/// This is helpful when a disassembler wants to stop after the last instruction
+/// in a function.
+///
+/// Note that this is still a heuristic - for example, calls to diverging
+/// functions will not be counted as the end of the containing function.
+#[derive(Debug)]
+pub struct FunctionExtentTracker {
+    /// Largest virtual address reached by any (un)conditional jump instruction.
+    max_jump_target: u32,
+}
+
+impl FunctionExtentTracker {
+    /// Creates a new function extent tracker starting at the function's start
+    /// address.
+    pub fn new(start: u32) -> Self {
+        Self {
+            max_jump_target: start,
+        }
+    }
+
+    /// Processes `instr` and determines if it ends the function containing it.
+    ///
+    /// # Parameters
+    ///
+    /// * `instr`: The instruction to process.
+    /// * `eip`: Value of `eip` / program counter *after* `instr`.
+    pub fn process(&mut self, instr: &Instr, eip: u32) -> bool {
+        self.visit_instr(instr);
+
+        // determine if `instr` can end the function
+        match instr {
+            Instr::Jump { target: Operand::Imm(imm) } if imm.zero_extended() < eip => {
+                // unconditional backwards jump can end the function
+                true
+            },
+            Instr::Ret { .. } => {
+                // `ret` can obviously end the functions
+                true
+            },
+            _ => false,
+        }
+    }
+}
+
+impl Visitor for FunctionExtentTracker {
+    fn visit_instr(&mut self, instr: &Instr) {
+        use cpu::instr::Instr::*;
+
+        match instr {
+            JumpIf { .. }
+            | Jump { .. } => visit::walk_instr(self, instr),
+            _ => {}     // not interesting
+        }
+    }
+
+    fn visit_immediate(&mut self, imm: &Immediate) {
+        // Jump target (always an absolute address)
+        self.max_jump_target = cmp::max(self.max_jump_target, imm.zero_extended());
+    }
 }

@@ -2,19 +2,19 @@ extern crate xe;
 extern crate xbe;
 extern crate env_logger;
 extern crate termcolor;
-#[macro_use] extern crate log;
+extern crate log;
 #[macro_use] extern crate structopt;
 
 use xe::cpu::decode::*;
-use xe::cpu::instr::{Instr, Operand, Addressing};
-use xe::cpu::disasm::{AsmPrinter, print_instr};
+use xe::cpu::instr::{Instr, Operand};
+use xe::cpu::disasm::{AsmPrinter, FunctionExtentTracker, MemHelper, print_instr};
 use xe::loader;
 use xe::memory::{MmapMemory, VirtualMemory};
 use xbe::Xbe;
 
 use structopt::StructOpt;
 use termcolor::{ColorChoice, Color, ColorSpec, StandardStream, WriteColor};
-use std::{cmp, fs, u32};
+use std::{fs, u32};
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -140,32 +140,8 @@ impl<W: WriteColor> AsmPrinter for TermPrinter<W> {
     }
 }
 
-/// Extracts helpful information for virtual address `addr`.
-fn addr_info<M: VirtualMemory>(xbe: &Xbe, mem: &M, addr: u32) -> String {
-    // kernel function?
-    let thunk_tbl = xbe.kernel_thunk_table();
-    if addr >= thunk_tbl.virt_addr() && addr < thunk_tbl.virt_addr() + thunk_tbl.len() {
-        // find out which index
-        let offset = addr - thunk_tbl.virt_addr();
-        let index = offset / 4;
-        debug!("addr {:#010X} at thunk tbl offset {:#010X} index {}", addr, offset, index);
-
-        // this should never be out of bounds if thunk table info and decoding is correct
-        return thunk_tbl.import_ids()[index as usize].name().into();
-    }
-
-    match mem.mapping_containing_addr(addr) {
-        Some(mapping) => {
-            let start = *mapping.virt_range().start();
-            let offset = addr - start;
-            format!("({:#X} bytes into '{}')", offset, mapping.name())
-        }
-        None => "(not mapped)".to_string(),
-    }
-}
-
 // returns the list of callees of this function
-fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_count: u32) -> HashSet<u32> {
+fn builtin<M: VirtualMemory>(xbe: &Xbe, _opt: &Opt, mem: &M, start: u32, byte_count: u32) -> HashSet<u32> {
     let mut printer = TermPrinter {
         w: StandardStream::stdout(ColorChoice::Auto),
         pc: start,
@@ -179,7 +155,8 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
     println!();
 
     let mut dec = Decoder::new(mem, start);
-    let mut max_jump_target = start;
+    let mut mem_helper = MemHelper::new(xbe, mem);
+    let mut tracker = FunctionExtentTracker::new(start);
     let mut callees = HashSet::new();
     loop {
         let pc_before = dec.current_address();
@@ -206,54 +183,16 @@ fn builtin<M: VirtualMemory>(xbe: &Xbe, opt: &Opt, mem: &M, start: u32, byte_cou
                     callees.insert(imm.zero_extended());
                 }
 
-                // track function extent and stop at the last `ret`
-                match instr {
-                    Instr::Ret { .. } if max_jump_target < pc => {
-                        // function ends here
-                        if !opt.cont {
-                            println!();
-                            break;
-                        }
-                    }
-                    Instr::Jump { target: Operand::Imm(imm) }
-                    if imm.zero_extended() < pc && max_jump_target < pc => {
-                        // unconditional backwards jump as last instr =
-                        // function ends here
-                        if !opt.cont {
-                            println!();
-                            break;
-                        }
-                    }
-                    Instr::Jump { target, .. } | Instr::JumpIf { target, ..} => {
-                        match target {
-                            Operand::Imm(target) => {
-                                let addr = target.zero_extended();
-                                max_jump_target = cmp::max(max_jump_target, addr);
-                            }
-                            _ => {} // can't track indirect jumps, assume they're outside of fn
-                        }
-                    }
-                    // display the target for indirect calls where the target
-                    // addr. is at an abs. addr. in memory
-                    Instr::Call { target: Operand::Mem(m) }
-                    | Instr::Mov { dest: Operand::Mem(m), src: _ }
-                    | Instr::Mov { dest: _, src: Operand::Mem(m) }
-                    | Instr::Push { operand: Operand::Mem(m) } => {
-                        // FIXME visit *all* instrs this way, probably writing a visitor
-                        // we can only be helpful if the access uses a flat
-                        // address space
-                        if !m.base_segment.may_be_used() {
-                            // ...and if the access has a fixed, abs. address
-                            if let Addressing::Disp { base: None, disp } = m.addressing {
-                                let info = addr_info(xbe, mem, disp as u32);
-
-                                print!("\t{}", info);
-                            }
-                        }
-                    }
-                    _ => {}
+                if let Some(info) = mem_helper.obtain_info(&instr) {
+                    print!("\t\t{}", info);
                 }
+
                 println!();
+
+                if tracker.process(&instr, pc) {
+                    // end of function
+                    break;
+                }
 
                 let disassembled_bytes = dec.current_address() - start;
                 if disassembled_bytes >= byte_count {

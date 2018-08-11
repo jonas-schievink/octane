@@ -25,16 +25,22 @@ pub trait Visitor {
     }
 
     /// Visit a register operand.
-    fn visit_register(&mut self, _reg: Register) {}
+    fn visit_register(&mut self, reg: Register) {
+        let _ = reg;
+    }
 
     /// Visit an immediate operand.
     ///
     /// Note that, depending on the instruction, this might be an interrupt or
     /// port number instead of a numeric operand.
-    fn visit_immediate(&mut self, _imm: &Immediate) {}
+    fn visit_immediate(&mut self, imm: &Immediate) {
+        let _ = imm;
+    }
 
     /// Visit a memory location operand.
-    fn visit_memory_location(&mut self, _mem: &MemoryLocation) {}
+    fn visit_memory_location(&mut self, loc: &MemoryLocation) {
+        let _ = loc;
+    }
 }
 
 /// Decomposes an `Instr` into its components and calls the corresponding
