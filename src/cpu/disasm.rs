@@ -1,12 +1,13 @@
 //! Instruction disassembler and pretty printer.
 
 use cpu::instr::*;
+use cpu::visit::{self, Visitor};
 
 /// Trait for assembly printing contexts.
 ///
 /// This can be implemented to color specific parts of an instruction and to
 /// supply a base address to resolve relative `call` targets.
-pub trait Printer {
+pub trait AsmPrinter {
     /// Print an instruction mnemonic/name.
     fn print_mnemonic(&mut self, mnemonic: &str);
 
@@ -35,13 +36,12 @@ pub trait Printer {
     /// relative to that address.
     ///
     /// If this is provided, some instruction may be displayed using a more
-    /// user-friendly format. For example, `call` targets are displayed as
-    /// absolute addresses instead of offsets.
+    /// user-friendly format.
     fn pc_ref(&self) -> Option<u32> { None }
 }
 
 /// Prints the instruction to a string, without formatting.
-impl Printer for String {
+impl AsmPrinter for String {
     fn print_mnemonic(&mut self, mnemonic: &str) {
         self.push_str(mnemonic);
     }
@@ -78,7 +78,6 @@ trait PrinterExt {
     fn print_segment(&mut self, segment: Segment);
     fn print_operand(&mut self, op: &Operand, hint: ImmReprHint, ambig_size: bool);
     fn print_jump_target_operand(&mut self, target: &Operand, is_branch: bool);
-    fn print_instr(&mut self, instr: &Instr);
 }
 
 /// Printer hint for operands - this will cause immediates to be printed as
@@ -89,7 +88,7 @@ enum ImmReprHint {
     Hex,
 }
 
-impl<P: Printer> PrinterExt for P {
+impl<P: AsmPrinter> PrinterExt for P {
     fn resolve_target(&self, offset: i32) -> Option<u32> {
         self.pc_ref().map(|pc| ((pc as i32 + offset) as u32))
     }
@@ -155,7 +154,6 @@ impl<P: Printer> PrinterExt for P {
             Operand::Reg(reg) => self.print_register(reg.name()),
             Operand::Imm(imm) => {
                 if ambig_size {
-                    // FIXME: Print immediates with 0-padding to avoid having to disambiguate
                     print_size(self);
                 }
 
@@ -257,287 +255,220 @@ impl<P: Printer> PrinterExt for P {
             self.print_operand(target, ImmReprHint::Hex, true);
         }
     }
+}
 
-    fn print_instr(&mut self, instr: &Instr) {
+struct Disassembler<'a, A: AsmPrinter + 'a> {
+    printer: &'a mut A,
+    operand_is_jump_target: bool,
+    dont_disambiguate: bool,
+    is_rel_jump: bool,
+    imm_fmt: ImmReprHint,
+}
+
+impl<'a, A: AsmPrinter> Visitor for Disassembler<'a, A> {
+    fn visit_instr(&mut self, instr: &Instr) {
         use cpu::instr::Instr::*;
 
-        for prefix in prefixes(instr) {
-            self.print_mnemonic(prefix);
-            self.space();
-        }
-        self.print_mnemonic(&mnemonic(&instr));
+        self.imm_fmt = match instr {
+            Alu { op, .. } => match op {
+                AluOp::Add => ImmReprHint::Dec,
+                AluOp::Or => ImmReprHint::Hex,
+                AluOp::Adc => ImmReprHint::Dec,
+                AluOp::Sbb => ImmReprHint::Dec,
+                AluOp::And => ImmReprHint::Hex,
+                AluOp::Sub => ImmReprHint::Dec,
+                AluOp::Xor => ImmReprHint::Hex,
+                AluOp::Cmp => ImmReprHint::Hex,
+            },
+            Ret { .. } => ImmReprHint::Dec,
+            Imul { .. }
+            | ImulTrunc { .. }
+            | Idiv { .. } => ImmReprHint::Dec,
+            Shift { .. } => ImmReprHint::Dec,
+            _ => ImmReprHint::Hex,
+        };
 
-        match instr {
-            Alu { op, dest, src } => {
-                // FIXME maybe immediates should be printed depending on op?
-                // (eg. signed for add etc. but unsigned for and)
-                let hint = match op {
-                    AluOp::Add => ImmReprHint::Dec,
-                    AluOp::Or => ImmReprHint::Hex,
-                    AluOp::Adc => ImmReprHint::Dec,
-                    AluOp::Sbb => ImmReprHint::Dec,
-                    AluOp::And => ImmReprHint::Hex,
-                    AluOp::Sub => ImmReprHint::Dec,
-                    AluOp::Xor => ImmReprHint::Hex,
-                    AluOp::Cmp => ImmReprHint::Hex,
-                };
-                self.space();
-                self.print_operand(dest, hint, true);
-                self.print_symbols(",");
-                self.print_operand(src, hint, false);
+        self.dont_disambiguate = match instr {
+            Ret { .. }
+            | Jump { .. }
+            | JumpIf { .. }
+            | Call { .. }
+            | Int { .. }
+            | Leave { .. }
+            | IntO => true,
+            _ => false,
+        };
+
+        let (is_rel_jump, operand_is_jump_target) = match instr {
+            JumpIf { .. }
+            | Jump { .. } => (true, true),
+            | Call { .. } => (false, true),
+            _ => (false, false),
+        };
+        self.is_rel_jump = is_rel_jump;
+        self.operand_is_jump_target = operand_is_jump_target;
+
+        visit::walk_instr(self, instr);
+    }
+
+    fn visit_prefixes(&mut self, prefixes: &[&str]) {
+        for prefix in prefixes {
+            self.printer.print_mnemonic(prefix);
+            self.printer.print_symbols(" ");
+        }
+    }
+
+    fn visit_mnemonic(&mut self, mnemonic: &str) {
+        self.printer.print_mnemonic(mnemonic);
+    }
+
+    fn visit_operands(&mut self, operands: &[&Operand]) {
+        let mut size = None;
+        let mut same_sizes = true;
+        for op in operands {
+            match size {
+                None => size = Some(op.size()),
+                Some(size) if op.size() != size => same_sizes = false,
+                _ => {}
             }
-            Shift { dest, src, .. } => {
-                self.space();
-                self.print_operand(dest, ImmReprHint::Dec, true);
-                self.print_symbols(",");
-                self.print_operand(src, ImmReprHint::Dec, false);
+        }
+
+        if !operands.is_empty() {
+            self.printer.space();
+        }
+
+        // All operands are by themselves ambiguous
+        let all_ambig = operands.iter().all(|op| match op {
+            Operand::Imm(_)
+            | Operand::Mem(_) => true,
+            Operand::Reg(_) => false,
+        });
+        // Whether the size of ambiguous operands (memory locations and
+        // immediates) should be disambiguated by using a
+        // `word`/`byte`/`dword`-like prefix.
+        let mut disambiguate_operand_sizes = if self.dont_disambiguate {
+            false
+        } else {
+            all_ambig || !same_sizes
+        };
+
+        for (i, op) in operands.iter().enumerate() {
+            if i != 0 {
+                self.printer.print_symbols(",");
             }
-            Mov { dest, src } => {
-                self.space();
-                self.print_operand(dest, ImmReprHint::Hex, false);  // always has 1 reg operand
-                self.print_symbols(",");
-                self.print_operand(src, ImmReprHint::Hex, false);
-            }
-            MovZx { dest, src }
-            | MovSx { dest, src } => {
-                self.space();
-                self.print_operand(&Operand::Reg(*dest), ImmReprHint::Hex, false);
-                self.print_symbols(",");
-                self.print_operand(src, ImmReprHint::Hex, true);  // different size than dest
-            }
-            JumpIf { cc: _, target } => {
-                self.space();
-                self.print_jump_target_operand(target, true);
-            }
-            Jump { target } => {
-                self.space();
-                self.print_jump_target_operand(target, true);
-            }
-            SetIf { cc: _, operand } => {
-                self.space();
-                self.print_operand(operand, ImmReprHint::Hex, false);
-            }
-            Call { target } => {
-                self.space();
-                self.print_jump_target_operand(target, false);
-            }
-            Ret { pop } => {
-                if *pop > 0 {
-                    self.space();
-                    self.print_immediate(&format!("{:}", pop));
+
+            if let Operand::Reg(_) = op {   // regs always have a known size
+            } else {
+                if disambiguate_operand_sizes {
+                    let word = match op.size() {
+                        OpSize::Bits8 => "byte",
+                        OpSize::Bits16 => "word",
+                        OpSize::Bits32 => "dword",
+                    };
+
+                    self.printer.print_immediate(word);
+                    self.printer.space();
+
+                    if same_sizes {
+                        // Disambiguating the first operand is enough if all
+                        // have the same size
+                        disambiguate_operand_sizes = false;
+                    }
                 }
             }
-            Push { operand } => {
-                self.space();
-                self.print_operand(operand, ImmReprHint::Hex, true);
+
+            visit::walk_operand(self, op);
+        }
+    }
+
+    fn visit_register(&mut self, reg: Register) {
+        self.printer.print_register(reg.name());
+    }
+
+    fn visit_immediate(&mut self, imm: &Immediate) {
+        if self.operand_is_jump_target {
+            // The operand is the absolute jump/call target
+            let target = imm.zero_extended();
+            if self.is_rel_jump && self.printer.pc_ref().is_some() {
+                let rel = target.wrapping_sub(self.printer.pc_ref().unwrap()) as i32;
+                self.printer.print_jump_target(&format!("{:+}", rel));
+                self.printer.print_symbols(" (-> ");
+                self.printer.print_jump_target(&format!("{:#010X}", target));
+                self.printer.print_symbols(")");
+            } else {
+                self.printer.print_jump_target(&format!("{:#010X}", target));
             }
-            Pop { operand } => {
-                self.space();
-                self.print_operand(operand, ImmReprHint::Dec, true);
-            }
-            Lea { dest, src } => {
-                self.space();
-                self.print_register(dest.name());
-                self.print_symbols(",");
-                self.print_operand(&Operand::Mem(src.clone()), ImmReprHint::Hex, false);
-            }
-            Test { lhs, rhs } => {
-                self.space();
-                self.print_operand(lhs, ImmReprHint::Hex, false);   // always has 1 reg
-                self.print_symbols(",");
-                self.print_operand(rhs, ImmReprHint::Hex, false);
-            }
-            Not { operand } => {
-                self.space();
-                self.print_operand(operand, ImmReprHint::Hex, true);
-            }
-            Neg { operand } => {
-                self.space();
-                self.print_operand(operand, ImmReprHint::Dec, true);
-            }
-            Mul { operand } |
-            Imul { operand } |
-            Div { operand } |
-            Idiv { operand } => {
-                self.space();
-                self.print_operand(operand, ImmReprHint::Dec, true);
-            }
-            ImulTrunc { dest, src1, src2 } => {
-                self.space();
-                self.print_register(dest.name());
-                if src1 != &Operand::Reg(*dest) {
-                    self.print_symbols(",");
-                    self.print_operand(src1, ImmReprHint::Dec, false);  // same size as op0 (register)
+        } else {
+            let s = match self.imm_fmt {
+                ImmReprHint::Dec => format!("{}", imm),
+                ImmReprHint::Hex => format!("{:#x}", imm),
+            };
+            self.printer.print_immediate(&s);
+        }
+    }
+
+    fn visit_memory_location(&mut self, mem: &MemoryLocation) {
+        self.printer.with_indirect(|p| {
+            match mem.addressing {
+                Addressing::Disp { base, disp } => {
+                    if mem.base_segment != Segment::Ds {    // FIXME not always default!
+                        p.print_segment(mem.base_segment);
+                    }
+
+                    if let Some(base) = base {
+                        p.print_register(base.name());
+                        if disp != 0 {
+                            p.print_symbols(if disp > 0 { "+" } else { "-" });
+                            p.print_addr_or_offset(&format!("{:#x}", disp.abs()));
+                        }
+                    } else {
+                        p.print_addr_or_offset(&format!("{:#x}", disp));
+                    }
                 }
-                self.print_symbols(",");
-                self.print_operand(src2, ImmReprHint::Dec, false);  // size not important
-            }
-            Inc { operand } |
-            Dec { operand } => {
-                self.space();
-                self.print_operand(operand, ImmReprHint::Dec, true);
-            }
-            Int { vector } => {
-                self.space();
-                self.print_immediate(&vector.to_string());
-            }
-            StrMem { op: StrMemOp::Outs(port), .. }
-            | StrMem { op: StrMemOp::Ins(port), .. } => {
-                self.space();
-                self.print_immediate(&port.to_string());
-            }
-            BitScan { dest, src, .. } => {
-                self.space();
-                self.print_register(dest.name());
-                self.print_symbols(",");
-                self.print_operand(src, ImmReprHint::Hex, false);   // src is register
-            }
-            Leave { .. }
-            | IntO
-            | StrMem { .. }
-            | Cwd
-            | Cdq => {},    // no operands
-        }
+                Addressing::Sib { scale, index, base, disp } => {
+                    if mem.base_segment != Segment::Ds {    // FIXME not always default!
+                        p.print_segment(mem.base_segment);
+                    }
 
-        self.done();
+                    match (base, index) {
+                        (Some(base), None) => {
+                            p.print_register(base.name());
+                        }
+                        (Some(base), Some(index)) => {
+                            p.print_register(base.name());
+                            p.print_symbols("+");
+                            p.print_register(index.name());
+                            if scale > 1 {
+                                p.print_symbols("*");
+                                p.print_addr_or_offset(&scale.to_string());
+                            }
+                        }
+                        (None, Some(index)) => {
+                            p.print_register(index.name());
+                            if scale > 1 {
+                                p.print_symbols("*");
+                                p.print_addr_or_offset(&scale.to_string());
+                            }
+                        }
+                        (None, None) => unreachable!("SIB addressing without base and index"),
+                    }
+
+                    if disp != 0 {
+                        p.print_symbols(if disp > 0 { "+" } else { "-" });
+                        p.print_addr_or_offset(&format!("{:#x}", disp.abs()));
+                    }
+                }
+            }
+        });
     }
 }
 
-fn prefixes(instr: &Instr) -> Vec<&'static str> {
-    use cpu::instr::Instr::*;
-
-    match instr {
-        Alu { .. }
-        | Shift { .. }
-        | Mov { .. }
-        | MovZx { .. }
-        | MovSx { .. }
-        | JumpIf { .. }
-        | Jump { .. }
-        | SetIf { .. }
-        | Call { .. }
-        | Ret { .. }
-        | Push { .. }
-        | Pop { .. }
-        | Lea { .. }
-        | Test { .. }
-        | Not { .. }
-        | Neg { .. }
-        | Mul { .. }
-        | Imul { .. }
-        | ImulTrunc { .. }
-        | Div { .. }
-        | Idiv { .. }
-        | Inc { .. }
-        | Dec { .. }
-        | Int { .. }
-        | BitScan { .. }
-        | IntO
-        | Cwd
-        | Cdq => vec![],  // prefixes don't need display or are unsupported
-        StrMem { rep: true, .. } => vec!["rep"],
-        StrMem { rep: false, .. } => vec![],
-        Leave { size: OpSize::Bits16 } => vec!["data16"],
-        Leave { size: _ } => vec![],
-    }
-}
-
-fn mnemonic(instr: &Instr) -> String {
-    use cpu::instr::Instr::*;
-    use cpu::instr::AluOp;
-
-    let simple = match instr {
-        Alu { op, .. } => match op {
-            AluOp::Add => "add",
-            AluOp::Or => "or",
-            AluOp::Adc => "adc",
-            AluOp::Sbb => "sbb",
-            AluOp::And => "and",
-            AluOp::Sub => "sub",
-            AluOp::Xor => "xor",
-            AluOp::Cmp => "cmp",
-        },
-        Shift { op, .. } => match op {
-            ShiftOp::Rol => "rol",
-            ShiftOp::Ror => "ror",
-            ShiftOp::Rcl => "rcl",
-            ShiftOp::Rcr => "rcr",
-            ShiftOp::Shl => "shl",
-            ShiftOp::Shr => "shr",
-            ShiftOp::Sal => "sal",
-            ShiftOp::Sar => "sar",
-        }
-        Mov { .. } => "mov",
-        MovZx { .. } => "movzx",
-        MovSx { .. } => "movsx",
-        JumpIf { cc, .. } => return format!("j{}", condition_code(*cc)),
-        Jump { .. } => "jmp",
-        SetIf { cc, .. } => return format!("set{}", condition_code(*cc)),
-        Call { .. } => "call",
-        Ret { .. } => "ret",
-        Push { .. } => "push",
-        Pop { .. } => "pop",
-        Lea { .. } => "lea",
-        Test { .. } => "test",
-        Not { .. } => "not",
-        Neg { .. } => "neg",
-        Mul { .. } => "mul",
-        Imul { .. } | ImulTrunc { .. } => "imul",
-        Div { .. } => "div",
-        Idiv { .. } => "idiv",
-        Inc { .. } => "inc",
-        Dec { .. } => "dec",
-        StrMem { op, size, rep: _ } => {
-            let mut s = String::new();
-            s.push_str(match op {
-                StrMemOp::Ins(_) => "ins",
-                StrMemOp::Outs(_) => "outs",
-                StrMemOp::Movs => "movs",
-                StrMemOp::Lods => "lods",
-                StrMemOp::Stos => "stos",
-            });
-            s.push_str(match size {
-                OpSize::Bits8 => "b",
-                OpSize::Bits16 => "w",
-                OpSize::Bits32 => "d",
-            });
-            return s;
-        },
-        BitScan { reverse: false, .. } => "bsf",
-        BitScan { reverse: true, .. } => "bsr",
-        Leave { .. } => "leave",
-        Int { .. } => "int",
-        IntO => "into",
-        Cwd => "cwd",
-        Cdq => "cdq",
-    };
-
-    simple.to_string()
-}
-
-fn condition_code(cc: ConditionCode) -> &'static str {
-    use self::ConditionCode::*;
-
-    match cc {
-        Above => "a",
-        NotCarry => "nc",
-        Carry => "c",
-        BelowOrEqual => "be",
-        Equal => "e",
-        Greater => "g",
-        GreaterOrEqual => "ge",
-        Less => "l",
-        LessOrEqual => "le",
-        NotEqual => "ne",
-        NotOverflow => "no",
-        NotParity => "np",
-        NotSign => "ns",
-        Overflow => "o",
-        Parity => "p",
-        Sign => "s",
-    }
-}
-
-pub fn print_instr<P: Printer>(instr: &Instr, p: &mut P) {
-    p.print_instr(instr);
+pub fn print_instr<P: AsmPrinter>(instr: &Instr, p: &mut P) {
+    Disassembler {
+        printer: p,
+        operand_is_jump_target: false,
+        dont_disambiguate: false,
+        is_rel_jump: false,
+        imm_fmt: ImmReprHint::Hex,
+    }.visit_instr(instr);
 }

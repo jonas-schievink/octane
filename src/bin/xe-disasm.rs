@@ -7,7 +7,7 @@ extern crate termcolor;
 
 use xe::cpu::decode::*;
 use xe::cpu::instr::{Instr, Operand, Addressing};
-use xe::cpu::disasm::{Printer, print_instr};
+use xe::cpu::disasm::{AsmPrinter, print_instr};
 use xe::loader;
 use xe::memory::{MmapMemory, VirtualMemory};
 use xbe::Xbe;
@@ -108,7 +108,7 @@ impl<W: WriteColor> TermPrinter<W> {
     }
 }
 
-impl<W: WriteColor> Printer for TermPrinter<W> {
+impl<W: WriteColor> AsmPrinter for TermPrinter<W> {
     fn print_mnemonic(&mut self, mnemonic: &str) {
         self.print(COLOR_MNEMONIC, mnemonic);
     }

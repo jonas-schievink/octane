@@ -355,7 +355,7 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                     OpSize::Bits32
                 };
                 let dest = modrm.reg(size);
-                let src = self.read_addressing(modrm, OpSize::Bits8 /* doesn't matter */)?;
+                let src = self.read_addressing(modrm, size)?;
                 match src {
                     Operand::Reg(_) | Operand::Imm(_) => {
                         return Err(DecoderError::ud("use of `lea` with non-memory operand"));
@@ -919,16 +919,16 @@ mod tests {
         decodes_as("8D BD 00 F4 FF FF", "lea edi,[ebp-0xc00]");
         decodes_as("6b 84 8b ab 00 00 00 02", "imul eax,[ebx+ecx*4+0xab],2");
         decodes_as("85 C0", "test eax,eax");
-        decodes_as("C1 E9 02", "shr ecx,2");
+        decodes_as("C1 E9 02", "shr ecx,byte 2");   // FIXME `byte` not ideal
         decodes_as("FF 74 24 04", "push dword [esp+0x4]");
         decodes_as("F3 AB", "rep stosd");
         decodes_as("C9", "leave");
         decodes_as("66 C9", "data16 leave");
-        decodes_as("C7 45 F4 40 00 00 00", "mov [ebp-0xc],0x40");
+        decodes_as("C7 45 F4 40 00 00 00", "mov dword [ebp-0xc],0x40");
         decodes_as("0F AF 45 E8", "imul eax,[ebp-0x18]");
         decodes_as("0F 95 C1", "setne cl");
         decodes_as("0F 84 AE 00 00 00", "je 0x000000B4");
-        decodes_as("FF 24 85 C1 D7 15 00", "jmp dword [eax*4+0x15d7c1]");
+        decodes_as("FF 24 85 C1 D7 15 00", "jmp [eax*4+0x15d7c1]");
         decodes_as("64 0F B6 05 24 00 00 00", "movzx eax,byte [fs:0x24]");
         decodes_as("64 0F BE 05 24 00 00 00", "movsx eax,byte [fs:0x24]");
         decodes_as("A8 82", "test al,0x82");

@@ -187,6 +187,8 @@ pub enum Instr {
 
     /// Truncating `imul` with up to 3 operands.
     ///
+    /// If `dest = src1`, this is a two-operand `imul` at the assembly level.
+    ///
     /// `dest = src1 * src2`.
     ImulTrunc {
         dest: Register,
