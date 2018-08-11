@@ -40,6 +40,9 @@ pub trait VirtualMemory {
     /// * `data`: The data to map into the virtual address space.
     /// * `name`: Debug name of the mapping. This can be the section name, or
     ///   for special areas a string like `<stack>`.
+    // FIXME This really should do a few additional things:
+    // * round everything to 4K pages (probably refuse when start isn't aligned)
+    // * refuse overlapping mappings
     fn add_mapping(&mut self, virt_range: RangeInclusive<u32>, data: &[u8], name: &str) -> Result<(), MapError>;
 
     /// Returns an iterator over all currently installed memory mappings.
