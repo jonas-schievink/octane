@@ -56,6 +56,7 @@ pub trait VirtualMemory {
     }
 
     fn load(&self, virt_addr: u32) -> Result<u8, MemoryError>;
+    fn store(&mut self, virt_addr: u32, value: u8) -> Result<(), MemoryError>;
 
     fn load_i32(&self, virt_addr: u32) -> Result<i32, MemoryError> {
         let (b0, b1, b2, b3) = (
@@ -83,6 +84,29 @@ pub trait VirtualMemory {
             b1 << 8 |
             b0
         ) as i16)
+    }
+
+    fn store_u16(&mut self, virt_addr: u32, value: u16) -> Result<(), MemoryError> {
+        let (lo, hi) = (value as u8, (value >> 8) as u8);
+        self.store(virt_addr, lo)?;
+        self.store(virt_addr + 1, hi)?;
+        Ok(())
+    }
+
+    fn store_u32(&mut self, mut virt_addr: u32, value: u32) -> Result<(), MemoryError> {
+        let bytes = [
+            value as u8,
+            (value >> 8) as u8,
+            (value >> 16) as u8,
+            (value >> 24) as u8,
+        ];
+
+        for b in &bytes {
+            self.store(virt_addr, *b)?;
+            virt_addr += 1;
+        }
+
+        Ok(())
     }
 }
 
@@ -174,6 +198,15 @@ impl VirtualMemory for ArrayMemory {
     fn load(&self, virt_addr: u32) -> Result<u8, MemoryError> {
         self.mem.get(virt_addr as usize).cloned().ok_or(MemoryError::Fault)
     }
+
+    fn store(&mut self, virt_addr: u32, value: u8) -> Result<(), MemoryError> {
+        if let Some(ptr) = self.mem.get_mut(virt_addr as usize) {
+            *ptr = value;
+            Ok(())
+        } else {
+            Err(MemoryError::Fault)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -228,6 +261,12 @@ impl VirtualMemory for MmapMemory {
         // unchecked indexing possible since we map the whole 4G
         let val = unsafe { self.mapping.get_unchecked(virt_addr as usize) };
         Ok(*val)
+    }
+
+    fn store(&mut self, virt_addr: u32, value: u8) -> Result<(), MemoryError> {
+        let ptr = unsafe { self.mapping.get_unchecked_mut(virt_addr as usize) };
+        *ptr = value;
+        Ok(())
     }
 
     fn load_i32(&self, virt_addr: u32) -> Result<i32, MemoryError> {

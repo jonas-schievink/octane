@@ -12,6 +12,7 @@ extern crate num_traits;
 extern crate xbe;
 extern crate core;
 extern crate memmap;
+extern crate termcolor;
 
 pub mod cpu;
 pub mod loader;

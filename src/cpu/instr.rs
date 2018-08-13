@@ -456,7 +456,20 @@ pub enum OpSize {
     Bits32,
 }
 
+impl fmt::Display for OpSize {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            OpSize::Bits8 => f.write_str("8-bit"),
+            OpSize::Bits16 => f.write_str("16-bit"),
+            OpSize::Bits32 => f.write_str("32-bit"),
+        }
+    }
+}
+
 /// An 8, 16 or 32-bit immediate value.
+///
+/// Note that while `Immediate` only stores signed values, whether the sign is
+/// meaningful depends on the operation performed on the values.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Immediate {
     Imm8(i8),
@@ -503,11 +516,37 @@ impl Immediate {
         }
     }
 
+    /// Returns the size of the immediate value.
     pub fn size(&self) -> OpSize {
         match self {
             Immediate::Imm8(_) => OpSize::Bits8,
             Immediate::Imm16(_) => OpSize::Bits16,
             Immediate::Imm32(_) => OpSize::Bits32,
+        }
+    }
+
+    /// If this immediate is 8 bits in size, returns it as a `u8`.
+    pub fn as_u8(&self) -> Option<u8> {
+        if let Immediate::Imm8(n) = self {
+            Some(*n as u8)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_u16(&self) -> Option<u16> {
+        if let Immediate::Imm16(n) = self {
+            Some(*n as u16)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_u32(&self) -> Option<u32> {
+        if let Immediate::Imm32(n) = self {
+            Some(*n as u32)
+        } else {
+            None
         }
     }
 }

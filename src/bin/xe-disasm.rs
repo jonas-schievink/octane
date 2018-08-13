@@ -5,24 +5,23 @@ extern crate termcolor;
 extern crate log;
 #[macro_use] extern crate structopt;
 
-use xe::cpu::decode::*;
 use xe::cpu::instr::{Instr, Operand};
-use xe::cpu::disasm::{AsmPrinter, FunctionExtentTracker, MemHelper, print_instr};
+use xe::cpu::disasm::{AsmPrinter, FunctionExtentTracker};
 use xe::loader;
 use xe::memory::{MmapMemory, VirtualMemory};
 use xbe::Xbe;
 
 use structopt::StructOpt;
-use termcolor::{ColorChoice, Color, ColorSpec, StandardStream, WriteColor};
+use termcolor::{ColorChoice, StandardStream};
 use std::{fs, u32};
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::io::Write;
-use std::fmt::Write as _Write;
 use std::str::FromStr;
 use std::num::ParseIntError;
 use std::collections::HashSet;
+use xe::cpu::disasm::TermPrinter;
 
 /// Parse a number that might be hexadecimal.
 fn parse_hex(src: &str) -> Result<u32, ParseIntError> {
@@ -89,120 +88,35 @@ impl FromStr for Disassembler {
     }
 }
 
-const COLOR_MNEMONIC: Color = Color::Blue;
-const COLOR_REGISTER: Color = Color::Red;
-const COLOR_IMMEDIATE: Color = Color::Green;
-const COLOR_ADDR: Color = Color::Cyan;
-const COLOR_TARGET: Color = Color::Yellow;
-
-struct TermPrinter<W: WriteColor> {
-    w: W,
-    pc: u32,
-}
-
-impl<W: WriteColor> TermPrinter<W> {
-    fn print(&mut self, color: Color, text: &str) {
-        self.w.set_color(ColorSpec::new().set_fg(Some(color))).unwrap();
-        write!(self.w, "{}", text).unwrap();
-        self.w.set_color(ColorSpec::new().set_fg(None)).unwrap();
-    }
-}
-
-impl<W: WriteColor> AsmPrinter for TermPrinter<W> {
-    fn print_mnemonic(&mut self, mnemonic: &str) {
-        self.print(COLOR_MNEMONIC, mnemonic);
-    }
-
-    fn print_register(&mut self, name: &str) {
-        self.print(COLOR_REGISTER, name);
-    }
-
-    fn print_immediate(&mut self, imm: &str) {
-        self.print(COLOR_IMMEDIATE, imm);
-    }
-
-    fn print_addr_or_offset(&mut self, addr: &str) {
-        self.print(COLOR_ADDR, addr);
-    }
-
-    fn print_jump_target(&mut self, target: &str) {
-        self.print(COLOR_TARGET, target);
-    }
-
-    fn print_symbols(&mut self, sym: &str) {
-        write!(self.w, "{}", sym).unwrap();
-    }
-
-    fn done(&mut self) {}
-
-    fn pc_ref(&self) -> Option<u32> {
-        Some(self.pc)
-    }
-}
-
 // returns the list of callees of this function
 fn builtin<M: VirtualMemory>(xbe: &Xbe, _opt: &Opt, mem: &M, start: u32, byte_count: u32) -> HashSet<u32> {
-    let mut printer = TermPrinter {
-        w: StandardStream::stdout(ColorChoice::Auto),
-        pc: start,
-    };
+    let mut printer = TermPrinter::new(StandardStream::stdout(ColorChoice::Auto), xbe, mem, start);
 
-    printer.print(COLOR_ADDR, &format!("{:08X}  ", start));
+    printer.print_addr_or_offset(&format!("{:08X}  ", start));
     let section = xbe.find_section_containing(start)
         .map(|sec| sec.name())
         .unwrap_or("<unmapped>");
     printer.print_symbols(&format!("disassembly start (in section '{}')", section));
     println!();
 
-    let mut dec = Decoder::new(mem, start);
-    let mut mem_helper = MemHelper::new(xbe, mem);
     let mut tracker = FunctionExtentTracker::new(start);
     let mut callees = HashSet::new();
-    loop {
-        let pc_before = dec.current_address();
-        let result = dec.decode_next();
-        match result {
-            Ok(instr) => {
-                printer.print(COLOR_ADDR, &format!("{:08X}  ", pc_before));
+    while let Ok(instr) = printer.disassemble() {
+        if let Instr::Call { target: Operand::Imm(imm) } = &instr {
+            // calls to fixed callees can be followed
+            callees.insert(imm.zero_extended());
+        }
 
-                let pc = dec.current_address();
-                printer.pc = pc;
+        println!();
 
-                let mut raw = String::new();
-                for addr in pc_before..pc {
-                    write!(raw, "{:02X} ", mem.load(addr).expect("could decode instr but not read mem?")).unwrap();
-                }
-                raw = format!("{:21} ", raw);
+        if tracker.process(&instr, printer.eip()) {
+            // end of function
+            break;
+        }
 
-                printer.print(COLOR_IMMEDIATE, &raw);
-
-                print_instr(&instr, &mut printer);
-
-                if let Instr::Call { target: Operand::Imm(imm) } = &instr {
-                    // calls to fixed callees can be followed
-                    callees.insert(imm.zero_extended());
-                }
-
-                if let Some(info) = mem_helper.obtain_info(&instr) {
-                    print!("\t\t{}", info);
-                }
-
-                println!();
-
-                if tracker.process(&instr, pc) {
-                    // end of function
-                    break;
-                }
-
-                let disassembled_bytes = dec.current_address() - start;
-                if disassembled_bytes >= byte_count {
-                    break;
-                }
-            },
-            Err(e) => {
-                println!("decoding error at {:#010X}: {:?}", pc_before, e);
-                break;
-            },
+        let disassembled_bytes = printer.eip() - start;
+        if disassembled_bytes >= byte_count {
+            break;
         }
     }
 

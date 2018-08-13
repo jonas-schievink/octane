@@ -7,13 +7,14 @@ bitflags! {
     /// A bitmask carrying any combination of x86 status flags.
     ///
     /// This is used, for example, to determine the flags that are read or
-    /// written by an instruction.
+    /// written by an instruction, or to store the current `EFLAGS` value of the
+    /// CPU.
     pub struct FlagSet: u32 {
         /// Carry flag.
         const CF = 1 << 0;
         /// Parity flag.
         const PF = 1 << 2;
-        /// Adjust flag.
+        /// Adjust flag (or Auxiliary Carry Flag).
         ///
         /// Set to whether a carry from the lower 4 bits of an operation has
         /// been generated.

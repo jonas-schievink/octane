@@ -2,10 +2,13 @@
 
 use cpu::instr::*;
 use cpu::visit::{self, Visitor};
+use cpu::decode::{Decoder, DecoderError};
 use memory::VirtualMemory;
 
 use xbe::Xbe;
+use termcolor::{Color, ColorSpec, WriteColor};
 use std::cmp;
+use std::fmt::Write;
 
 /// Trait for assembly printing contexts.
 ///
@@ -582,14 +585,15 @@ impl FunctionExtentTracker {
         self.visit_instr(instr);
 
         // determine if `instr` can end the function
+        let no_jump_past_eip = self.max_jump_target < eip;
         match instr {
             Instr::Jump { target: Operand::Imm(imm) } if imm.zero_extended() < eip => {
                 // unconditional backwards jump can end the function
-                true
+                no_jump_past_eip
             },
             Instr::Ret { .. } => {
                 // `ret` can obviously end the functions
-                true
+                no_jump_past_eip
             },
             _ => false,
         }
@@ -610,5 +614,112 @@ impl Visitor for FunctionExtentTracker {
     fn visit_immediate(&mut self, imm: &Immediate) {
         // Jump target (always an absolute address)
         self.max_jump_target = cmp::max(self.max_jump_target, imm.zero_extended());
+    }
+}
+
+const COLOR_MNEMONIC: Color = Color::Blue;
+const COLOR_REGISTER: Color = Color::Red;
+const COLOR_IMMEDIATE: Color = Color::Green;
+const COLOR_ADDR: Color = Color::Cyan;
+const COLOR_TARGET: Color = Color::Yellow;
+
+/// A disassembly printer with bells and whistles that prints to the terminal.
+#[derive(Debug)]
+pub struct TermPrinter<'a, W: WriteColor, M: VirtualMemory + 'a> {
+    w: W,
+    mem_helper: MemHelper<'a, M>,
+    mem: &'a M,
+    eip: u32,
+}
+
+impl<'a, W: WriteColor, M: VirtualMemory> TermPrinter<'a, W, M> {
+    pub fn new(term: W, xbe: &'a Xbe, mem: &'a M, eip: u32) -> Self {
+        Self {
+            w: term,
+            mem_helper: MemHelper::new(xbe, mem),
+            mem,
+            eip,
+        }
+    }
+
+    /// Decodes the next instruction from memory and disassembles and returns
+    /// it.
+    pub fn disassemble(&mut self) -> Result<Instr, DecoderError> {
+        let mut dec = Decoder::new(self.mem, self.eip);
+        let pc_before = dec.current_address();
+        let instr = dec.decode_next()?;
+
+        // update eip ref right after decoding
+        let pc = dec.current_address();
+        self.eip = pc;
+
+        self.print_addr_or_offset(&format!("{:08X}", pc_before));
+        self.print_symbols("  ");
+
+
+        let mut raw = String::new();
+        for addr in pc_before..pc {
+            write!(raw, "{:02X} ", self.mem.load(addr).expect("could decode instr but not read mem?")).unwrap();
+        }
+        raw = format!("{:21} ", raw);
+
+        self.print_immediate(&raw);
+
+        print_instr(&instr, self);
+
+        if let Some(info) = self.mem_helper.obtain_info(&instr) {
+            self.print_symbols(&format!("\t\t{}", info));
+        }
+
+        Ok(instr)
+    }
+
+    /// Returns the current value of the instruction pointer maintained by this
+    /// disassembler.
+    ///
+    /// This points at the next instruction that will be disassembled by a call
+    /// to `disassemble`.
+    pub fn eip(&self) -> u32 {
+        self.eip
+    }
+}
+
+impl<'a, W: WriteColor, M: VirtualMemory> TermPrinter<'a, W, M> {
+    fn print(&mut self, color: Color, text: &str) {
+        self.w.set_color(ColorSpec::new().set_fg(Some(color))).unwrap();
+        write!(self.w, "{}", text).unwrap();
+        self.w.set_color(ColorSpec::new().set_fg(None)).unwrap();
+    }
+}
+
+impl<'a, W: WriteColor, M: VirtualMemory> AsmPrinter for TermPrinter<'a, W, M> {
+    fn print_mnemonic(&mut self, mnemonic: &str) {
+        self.print(COLOR_MNEMONIC, mnemonic);
+    }
+
+    fn print_register(&mut self, name: &str) {
+        self.print(COLOR_REGISTER, name);
+    }
+
+    fn print_immediate(&mut self, imm: &str) {
+        self.print(COLOR_IMMEDIATE, imm);
+    }
+
+    fn print_addr_or_offset(&mut self, addr: &str) {
+        self.print(COLOR_ADDR, addr);
+    }
+
+    fn print_jump_target(&mut self, target: &str) {
+        self.print(COLOR_TARGET, target);
+    }
+
+    fn print_symbols(&mut self, sym: &str) {
+        write!(self.w, "{}", sym).unwrap();
+    }
+
+    fn done(&mut self) {}
+
+    fn pc_ref(&self) -> Option<u32> {
+        Some(self.eip)
     }
 }

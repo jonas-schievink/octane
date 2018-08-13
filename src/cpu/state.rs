@@ -1,5 +1,8 @@
 //! x86 processor state.
 
+use cpu::instr::{Register, Immediate};
+use cpu::flags::FlagSet;
+
 /// CPU state consisting of the emulated registers.
 #[derive(Debug)]
 pub struct State {
@@ -14,6 +17,8 @@ pub struct State {
     esp: u32,
 
     eip: u32,
+
+    flags: FlagSet,
 }
 
 impl State {
@@ -35,10 +40,49 @@ impl State {
             ebp: 0,
             esp,
             eip,
+            flags: FlagSet::empty(),
+        }
+    }
+
+    /// Sets all status flags `flags` to the value of `bit`.
+    pub fn update_flags(&mut self, flags: FlagSet, bit: bool) {
+        self.flags.set(flags, bit);
+    }
+
+    /// Retrieve the value of the given register.
+    pub fn get_register(&self, reg: Register) -> Immediate {
+        use cpu::instr::Register::*;
+
+        match reg {
+            Al => self.al().into(),
+            Ah => self.ah().into(),
+            Bl => self.bl().into(),
+            Bh => self.bh().into(),
+            Cl => self.cl().into(),
+            Ch => self.ch().into(),
+            Dl => self.dl().into(),
+            Dh => self.dh().into(),
+            Ax => self.ax().into(),
+            Bx => self.bx().into(),
+            Cx => self.cx().into(),
+            Dx => self.dx().into(),
+            Eax => self.eax().into(),
+            Ebx => self.ebx().into(),
+            Ecx => self.ecx().into(),
+            Edx => self.edx().into(),
+            Si => self.si().into(),
+            Esi => self.esi().into(),
+            Di => self.di().into(),
+            Edi => self.edi().into(),
+            Bp => self.bp().into(),
+            Ebp => self.ebp().into(),
+            Sp => self.sp().into(),
+            Esp => self.esp().into(),
         }
     }
 }
 
+/// Generates accessor methods for registers and their subregisters.
 macro_rules! accessors {
     (
         $base:ident: [ $getter32:ident/$setter32:ident ]
@@ -76,7 +120,7 @@ impl State {
     accessors!(esi: [esi/set_esi, si/set_si]);
     accessors!(edi: [edi/set_edi, di/set_di]);
     accessors!(ebp: [ebp/set_ebp, bp/set_bp]);
-    accessors!(esp: [esp/set_esp]);
+    accessors!(esp: [esp/set_esp, sp/set_sp]);
     accessors!(eip: [eip/set_eip]);
 }
 

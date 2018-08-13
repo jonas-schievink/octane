@@ -5,6 +5,8 @@ use cpu::prefix::{Prefixes, PrefixFlags};
 use memory::{VirtualMemory, MemoryError};
 
 use num_traits::FromPrimitive;
+use std::error::Error;
+use std::fmt;
 
 /// x86 machine instruction decoder.
 #[derive(Debug)]
@@ -867,6 +869,17 @@ impl DecoderError {
         DecoderError::Undefined(why.as_ref().to_string())
     }
 }
+
+impl fmt::Display for DecoderError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DecoderError::Memory(e) => e.fmt(f),
+            DecoderError::Undefined(s) => f.write_str(s),
+        }
+    }
+}
+
+impl Error for DecoderError {}
 
 impl From<MemoryError> for DecoderError {
     #[cold]
