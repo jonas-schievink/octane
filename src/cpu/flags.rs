@@ -6,10 +6,13 @@
 bitflags! {
     /// A bitmask carrying any combination of x86 status flags.
     ///
+    /// This only contains "interesting" status flags set and read by
+    /// instructions, not OS-level flags that always stay the same.
+    ///
     /// This is used, for example, to determine the flags that are read or
     /// written by an instruction, or to store the current `EFLAGS` value of the
     /// CPU.
-    pub struct FlagSet: u32 {
+    pub struct Flags: u32 {
         /// Carry flag.
         const CF = 1 << 0;
         /// Parity flag.

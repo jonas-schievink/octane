@@ -1,7 +1,7 @@
 //! x86 processor state.
 
 use cpu::instr::{Register, Immediate};
-use cpu::flags::FlagSet;
+use cpu::Flags;
 
 /// CPU state consisting of the emulated registers.
 #[derive(Debug)]
@@ -18,7 +18,7 @@ pub struct State {
 
     eip: u32,
 
-    flags: FlagSet,
+    flags: Flags,
 }
 
 impl State {
@@ -40,12 +40,14 @@ impl State {
             ebp: 0,
             esp,
             eip,
-            flags: FlagSet::empty(),
+            flags: Flags::empty(),
         }
     }
 
+    pub fn flags(&self) -> &Flags { &self.flags }
+
     /// Sets all status flags `flags` to the value of `bit`.
-    pub fn update_flags(&mut self, flags: FlagSet, bit: bool) {
+    pub fn update_flags(&mut self, flags: Flags, bit: bool) {
         self.flags.set(flags, bit);
     }
 

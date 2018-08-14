@@ -214,9 +214,18 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
                 // size bit inverted and in different position
                 let smol = byte & 0b10 != 0;
                 let size = self.prefixes.size(!smol)?;
-                let imm = self.read_immediate(size)?.into();
+                let mut imm = self.read_immediate(size)?;
 
-                Instr::Push { operand: imm }
+                // This is really weird, because this can be encoded with an
+                // 8-bit immediate, but x86 can never push a single byte. On
+                // x86-64 the 8-bit value is sign-extended all the way to 64
+                // bits, on x86 we extend to 32 bits. The 16-bit encoding is not
+                // touched at all and the 16-bit value is just pushed as-is.
+                if let Immediate::Imm8(_) = imm {
+                    imm = imm.sign_ext_to(OpSize::Bits32);
+                }
+
+                Instr::Push { operand: imm.into() }
             }
             _ if bitpat!(1 1 1 1 0 1 1 _)(byte) => {  // 0xF6 / 0xF7
                 // test/not/neg/mul/imul/div/idiv
