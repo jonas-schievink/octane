@@ -12,13 +12,80 @@ use std::error::Error;
 use num_traits::PrimInt;
 use num_traits::Signed;
 
-#[derive(Debug)]
-pub struct Interpreter<M: VirtualMemory> {
-    state: State,
-    mem: M,
+/// Provides instruction hooks that can alter the interpreter's behaviour.
+pub trait Hooks: Sized {
+    /// `call` instruction.
+    ///
+    /// This can be hooked to perform HLE calls. The hook is invoked after the
+    /// call target has been loaded from memory, but before the return address
+    /// is pushed onto the stack.
+    ///
+    /// If this returns `HookAction::Nop`, the return address will not be pushed
+    /// onto the stack at all.
+    ///
+    /// # Parameters
+    ///
+    /// * `interp`: Interpreter and system state.
+    /// * `eip`: Return address pointing just after the `call` instruction.
+    /// * `target`: The call target as a virtual address.
+    fn call<M: VirtualMemory>(
+        &mut self,
+        interp: &mut Interpreter<Self, M>,
+        eip: u32,
+        target: u32,
+    ) -> Result<HookAction, HookError> {
+        let _ = (interp, eip, target);
+        Ok(HookAction::Continue)
+    }
 }
 
-impl<M: VirtualMemory> Interpreter<M> {
+/// Determines how the interpreter should proceed after calling a hook.
+#[derive(Debug)]
+pub enum HookAction {
+    /// Continue executing the instruction as if the hook wasn't there.
+    Continue,
+    /// Skip the instruction as if it's a nop. The hook already performed all
+    /// required effects.
+    ///
+    /// Note that operands will still be loaded from memory before the hook
+    /// itself is called, so any side effects from that will still happen.
+    Nop,
+}
+
+/// An error returned by an interpreter hook.
+#[derive(Debug)]
+pub struct HookError(String);
+
+impl HookError {
+    pub fn new(msg: String) -> Self {
+        HookError(msg)
+    }
+}
+
+impl fmt::Display for HookError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// A struct implementing no-op `Hooks`. All instructions will behave like on a
+/// "real" x86.
+#[derive(Debug)]
+pub struct NoHooks;
+
+impl Hooks for NoHooks {}
+
+/// The x86 instruction interpreter.
+#[derive(Debug)]
+pub struct Interpreter<H: Hooks, M: VirtualMemory> {
+    /// CPU state (registers).
+    pub state: State,
+    /// Virtual memory.
+    pub mem: M,
+    hooks: Option<Box<H>>,
+}
+
+impl<H: Hooks, M: VirtualMemory> Interpreter<H, M> {
     /// Creates a new interpreter.
     ///
     /// # Parameters
@@ -28,10 +95,12 @@ impl<M: VirtualMemory> Interpreter<M> {
     ///   instruction that will be executed.
     /// * `esp`: Initial stack pointer value. Usually points at the first
     ///   address behind the allocated stack.
-    pub fn new(mem: M, eip: u32, esp: u32) -> Self {
+    /// * `hooks`: A `Hooks` implementor.
+    pub fn new(mem: M, eip: u32, esp: u32, hooks: H) -> Self {
         Self {
             state: State::new(eip, esp),
             mem,
+            hooks: Some(Box::new(hooks)),
         }
     }
 
@@ -50,6 +119,7 @@ impl<M: VirtualMemory> Interpreter<M> {
     pub fn mem_mut(&mut self) -> &mut M {
         &mut self.mem
     }
+    // TODO remove accessors
 
     /// Fetch, decode and execute the next instruction.
     pub fn step(&mut self) -> Result<(), InterpreterError> {
@@ -150,10 +220,17 @@ impl<M: VirtualMemory> Interpreter<M> {
                 }
             }
             Call { target } => {
-                let target = self.eval_operand(target)?;
-                let eip = self.state.eip().into();
-                self.push(eip)?;
-                self.state.set_eip(target.as_u32().expect("non-32-bit call?"));
+                let target = self.eval_operand(target)?.as_u32()
+                    .expect("call target not 32-bit?");
+                let eip = self.state.eip();
+
+                match self.with_hooks(|interp, hooks| hooks.call(interp, eip, target))? {
+                    HookAction::Continue => {
+                        self.push(eip.into())?;
+                        self.state.set_eip(target);
+                    }
+                    HookAction::Nop => {}
+                }
             }
             Push { operand } => {
                 let value = self.eval_operand(operand)?;
@@ -440,6 +517,14 @@ impl<M: VirtualMemory> Interpreter<M> {
             Sign           => flags.contains(Flags::SF),
         }
     }
+
+    fn with_hooks<F, R>(&mut self, f: F) -> R
+    where F: FnOnce(&mut Self, &mut H) -> R {
+        let mut hooks = self.hooks.take().expect("hooks appear to have gone for a walk");
+        let result = f(self, &mut hooks);
+        self.hooks = Some(hooks);
+        result
+    }
 }
 
 struct ShiftResult<N> {
@@ -503,6 +588,8 @@ pub enum InterpreterError {
     Decode(DecoderError),
     /// Memory access error during execution of an instruction.
     Memory(MemoryError),
+    /// A hook returned an error.
+    Hook(HookError),
     /// `#DE` was raised by a division instruction.
     DivisionException,
 }
@@ -519,11 +606,18 @@ impl From<MemoryError> for InterpreterError {
     }
 }
 
+impl From<HookError> for InterpreterError {
+    fn from(e: HookError) -> Self {
+        InterpreterError::Hook(e)
+    }
+}
+
 impl fmt::Display for InterpreterError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             InterpreterError::Decode(err) => err.fmt(f),
             InterpreterError::Memory(err) => err.fmt(f),
+            InterpreterError::Hook(err) => err.fmt(f),
             InterpreterError::DivisionException => write!(f, "division exception"),
         }
     }

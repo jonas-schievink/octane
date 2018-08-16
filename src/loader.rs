@@ -6,6 +6,9 @@ use memory::{VirtualMemory, MapError};
 use std::error::Error;
 use std::fmt;
 
+// FIXME it's probably better to replace this module with an "Emulator" struct
+// that performs loading using a private function called on construction
+
 /// Load an XBE into memory and prepare it for execution.
 pub fn load<M: VirtualMemory>(xbe: &Xbe, mem: &mut M) -> Result<LoaderInfo, LoaderError> {
     // Map the XBE headers at the specified base address
@@ -24,6 +27,7 @@ pub fn load<M: VirtualMemory>(xbe: &Xbe, mem: &mut M) -> Result<LoaderInfo, Load
     }
 
     // TODO: Resolve kernel imports
+    // TODO: Reserve space for shared kernel variables and initialize them
 
     // TODO: Allocate stack properly
     let stack_start = 0x7000_0000;
@@ -56,6 +60,7 @@ pub struct LoaderInfo {
     pub esp: u32,
 }
 
+/// Error returned while loading an XBE.
 #[derive(Debug)]
 pub struct LoaderError(MapError);
 

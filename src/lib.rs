@@ -17,4 +17,4 @@ extern crate termcolor;
 pub mod cpu;
 pub mod loader;
 pub mod memory;
-mod utils;
+pub mod kernel;

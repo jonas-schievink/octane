@@ -9,6 +9,7 @@ use xe::cpu::disasm::TermPrinter;
 use xe::cpu::interpret::Interpreter;
 use xe::loader;
 use xe::memory::MmapMemory;
+use xe::kernel::Kernel;
 use xbe::Xbe;
 
 use structopt::StructOpt;
@@ -36,9 +37,10 @@ fn main() -> Result<(), Box<Error>> {
 
     let mut mem = MmapMemory::new();
     let load_info = loader::load(&xbe, &mut mem)?;
+    let kernel = Kernel::new();
 
     let entry = xbe.entry_point();
-    let mut interpreter = Interpreter::new(mem, entry, load_info.esp);
+    let mut interpreter = Interpreter::new(mem, entry, load_info.esp, kernel);
 
     loop {
         {
