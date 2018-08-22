@@ -1,6 +1,5 @@
 language: rust
 rust:
-  - 1.21.0  # TODO: Adjust minimum supported Rust version accordingly
   - stable
   - nightly
 cache: cargo
@@ -10,7 +9,21 @@ env:
     - RUSTFLAGS="--deny warnings"
     - RUST_BACKTRACE=1
     - CARGO_INCREMENTAL=0  # decrease size of `target` to make the cache smaller
-  matrix:
-    - FEATURES=""  # default configuration
+
+before_script:
+  - export PATH=$HOME/.cargo/bin:$PATH
+  - cargo install cargo-update || echo "cargo-update already installed"
+  - cargo install cargo-travis || echo "cargo-travis already installed"
+  - cargo install-update -a  # update outdated cached binaries
+
+# the main build
 script:
-  - cargo test $FEATURES
+  - |
+      cargo build &&
+      cargo test &&
+      cargo bench &&
+      cargo doc
+
+after_success:
+  # upload documentation to github (gh-pages branch)
+  - cargo doc-upload
