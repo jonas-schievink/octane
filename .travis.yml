@@ -22,7 +22,7 @@ script:
       cargo build &&
       cargo test &&
       cargo bench &&
-      cargo rustdoc -- --document-private-items
+      cargo rustdoc --lib --open -- --no-defaults --passes collapse-docs --passes unindent-comments --passes strip-priv-imports
 
 after_success:
   # upload documentation to github (gh-pages branch)
