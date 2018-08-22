@@ -1,3 +1,5 @@
+//! Emulation of the Xbox x86 CPU.
+
 mod prefix;
 mod flags;
 mod defs;

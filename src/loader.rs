@@ -20,6 +20,7 @@ pub fn load<M: VirtualMemory>(xbe: &Xbe, mem: &mut M) -> Result<LoaderInfo, Load
     // exactly where the first section starts (after rounding up to whole pages)
 
     // FIXME we probably want the xbe crate to check that no sections overlap
+    // FIXME this probably needs to handle the preload flag, but I haven't found much info on it
     for section in xbe.sections() {
         let range = section.virt_range();
         mem.add_mapping(range, section.data(), section.name())

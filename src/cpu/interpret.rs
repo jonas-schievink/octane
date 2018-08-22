@@ -91,14 +91,10 @@ impl<H: Hooks, M: VirtualMemory> Interpreter<H, M> {
     /// # Parameters
     ///
     /// * `mem`: The virtual memory space to operate on.
-    /// * `eip`: Initial value of the `eip` register. Points to the first
-    ///   instruction that will be executed.
-    /// * `esp`: Initial stack pointer value. Usually points at the first
-    ///   address behind the allocated stack.
     /// * `hooks`: A `Hooks` implementor.
-    pub fn new(mem: M, eip: u32, esp: u32, hooks: H) -> Self {
+    pub fn new(mem: M, state: State, hooks: H) -> Self {
         Self {
-            state: State::new(eip, esp),
+            state,
             mem,
             hooks: Some(Box::new(hooks)),
         }

@@ -7,14 +7,13 @@ extern crate log;
 
 use xe::cpu::disasm::TermPrinter;
 use xe::cpu::interpret::Interpreter;
-use xe::loader;
 use xe::memory::MmapMemory;
 use xe::kernel::Kernel;
 use xbe::Xbe;
 
 use structopt::StructOpt;
 use termcolor::{ColorChoice, StandardStream};
-use std::fs;
+use std::{fs, process};
 use std::error::Error;
 use std::path::PathBuf;
 
@@ -26,9 +25,7 @@ struct Opt {
     path: PathBuf,
 }
 
-fn main() -> Result<(), Box<Error>> {
-    env_logger::init();
-
+fn run() -> Result<(), Box<Error>> {
     let opt = Opt::from_args();
 
     let contents = fs::read(&opt.path)?;
@@ -36,11 +33,10 @@ fn main() -> Result<(), Box<Error>> {
     eprintln!("opened '{}'", xbe.title_name());
 
     let mut mem = MmapMemory::new();
-    let load_info = loader::load(&xbe, &mut mem)?;
-    let kernel = Kernel::new();
+    let kernel = Kernel::load(&xbe, &mut mem)?;
 
-    let entry = xbe.entry_point();
-    let mut interpreter = Interpreter::new(mem, entry, load_info.esp, kernel);
+    let initial_state = kernel.current_thread_state();
+    let mut interpreter = Interpreter::new(mem, initial_state, kernel);
 
     loop {
         {
@@ -52,5 +48,17 @@ fn main() -> Result<(), Box<Error>> {
             }
         }
         interpreter.step()?;
+    }
+}
+
+fn main() {
+    env_logger::init();
+
+    match run() {
+        Ok(()) => {},
+        Err(e) => {
+            eprintln!("exiting due to error: {}", e);
+            process::exit(1);
+        },
     }
 }

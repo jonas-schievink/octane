@@ -4,7 +4,7 @@ use cpu::instr::{Register, Immediate};
 use cpu::Flags;
 
 /// CPU state consisting of the emulated registers.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct State {
     eax: u32,
     ebx: u32,
