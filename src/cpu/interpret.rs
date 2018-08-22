@@ -228,6 +228,12 @@ impl<H: Hooks, M: VirtualMemory> Interpreter<H, M> {
                     HookAction::Nop => {}
                 }
             }
+            Ret { pop } => {
+                let esp = self.state.esp();
+                let return_addr = self.mem.load_i32(esp)? as u32;
+                self.state.set_esp(esp + 4 + u32::from(*pop));
+                self.state.set_eip(return_addr);
+            }
             Push { operand } => {
                 let value = self.eval_operand(operand)?;
                 self.push(value)?;
