@@ -13,6 +13,7 @@ extern crate xbe;
 extern crate core;
 extern crate memmap;
 extern crate termcolor;
+extern crate generational_arena;
 
 pub mod cpu;
 pub mod loader;

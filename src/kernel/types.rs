@@ -104,10 +104,18 @@ impl<T> fmt::Debug for XPtr<T> {
 /// program overwrites it or hands us a garbage address (since it wouldn't be in
 /// the map).
 ///
-/// This is usable only for opaque pointers to kernel structures.
+/// This is usable only for opaque pointers to kernel structures (kernel
+/// objects), not for structures that have transparent members.
+///
+/// `Handle`s can also be kernel-internal and never be passed to the program,
+/// which ensures that the managed object isn't destroyed as soon as the program
+/// `NtClose`s its handle. However, a badly behaved program might guess internal
+/// handles and close them anyways, so the kernel should be prepared for that
+/// happening.
 ///
 /// Note that `PHANDLE` is a program-controlled pointer (`XPtr`) to such a
 /// handle.
+#[must_use = "handles should be closed, stored or returned to the program"]
 pub struct Handle<T> {
     addr: u32,
     _phantom: PhantomData<*const T>,
@@ -117,15 +125,6 @@ impl<T> Handle<T> {
     /// The raw address as seen by the emulated program.
     pub fn raw_addr(&self) -> u32 {
         self.addr
-    }
-}
-
-impl<T> Clone for Handle<T> {
-    fn clone(&self) -> Self {
-        Self {
-            addr: self.addr,
-            _phantom: PhantomData,
-        }
     }
 }
 

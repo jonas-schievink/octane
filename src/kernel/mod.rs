@@ -28,58 +28,23 @@
 //!   dispatch the function's ID to the implementation you just created.
 // FIXME: Remove all references that claim that the kernel is based on WinNT/2000
 
-mod mm;
-mod ps;
-mod rtl;
-mod table;
+pub mod mm;
+pub mod ps;
+pub mod rtl;
+pub mod table;
+pub mod object;
 pub mod types;
 
 use self::table::{KernelExportKind, KernelAbi};
 use self::types::{Handle, FromRawArgs, ApiReturnValue};
+use self::object::*;
 use memory::{MemoryError, MapError, VirtualMemory};
 use cpu::interpret::{Hooks, HookAction, HookError, Interpreter};
 use cpu;
 
 use xbe::Xbe;
-use std::collections::BTreeMap;
-use std::collections::btree_map::Entry;
 use std::fmt;
 use std::error::Error;
-
-/// Stores a collections of handles, each associated to host data of type `T`.
-///
-/// See `types::Handle<T>`.
-#[derive(Debug)]
-pub struct HandleSet<T> {
-    map: BTreeMap<u32, T>,
-}
-
-impl<T> HandleSet<T> {
-    /// Creates a new, empty handle set.
-    pub fn new() -> Self {
-        Self {
-            map: BTreeMap::new(),
-        }
-    }
-
-    /// Insert a new value into the set.
-    pub fn insert(&mut self, handle: Handle<T>, value: T) -> &mut T {
-        match self.map.entry(handle.raw_addr()) {
-            Entry::Vacant(e) => e.insert(value),
-            Entry::Occupied(_) => {
-                panic!("attempted to overwrite value associated to handle {:?}", handle);
-            }
-        }
-    }
-
-    pub fn get(&self, handle: Handle<T>) -> Option<&T> {
-        self.map.get(&handle.raw_addr())
-    }
-
-    pub fn get_mut(&mut self, handle: Handle<T>) -> Option<&mut T> {
-        self.map.get_mut(&handle.raw_addr())
-    }
-}
 
 /// Kernel implementation and host-side data.
 ///
@@ -94,6 +59,8 @@ impl<T> HandleSet<T> {
 pub struct Kernel {
     /// Next "magic" address to use for the next handle that is allocated.
     next_handle_addr: u32,
+    /// Kernel objects.
+    objects: ObjectSet,
 
     ps: ps::Subsystem,
     mm: mm::Subsystem,
@@ -110,6 +77,7 @@ impl Kernel {
             // Start handle is chosen arbitrarily but must not collide with any
             // allocated or allocatable memory.
             next_handle_addr: HANDLE_START,
+            objects: ObjectSet::new(),
             ps: ps::Subsystem::init(),
             mm: mm::Subsystem::init(),
         };
@@ -167,8 +135,9 @@ impl Kernel {
             .expect("couldn't map stack for main thread");
 
         let thread = ps::Thread::new(entry, *stack.start(), stack_size);
-        let handle = self.alloc_handle();
-        self.ps.register_thread(handle, thread);
+        let handle = self.register_thread(thread);
+        self.close_handle(handle)
+            .expect("couldn't close extraneous main thread handle");
     }
 
     /// Returns the CPU state stored for the current thread.
@@ -177,17 +146,50 @@ impl Kernel {
     /// automatically when the interpreter runs. Updating the saved state
     /// requires a context switch to another thread.
     pub fn current_thread_state(&self) -> cpu::State {
-        self.ps.current_thread().saved_state()
+        self.current_thread().saved_state()
     }
 
     /// Allocates a new handle that can refer to a value of type `T`.
     ///
     /// The handle starts out unassociated and doesn't refer to any value.
-    pub fn alloc_handle<T>(&mut self) -> Handle<T> {
+    fn alloc_handle<T>(&mut self) -> Handle<T> {
         let addr = self.next_handle_addr;
         self.next_handle_addr = self.next_handle_addr.checked_add(1)
             .expect("out of handles");
         Handle::from(addr)
+    }
+
+    /// Registers an object to be managed by the kernel and allocates a handle
+    /// pointing to the object.
+    pub fn register_object<T>(&mut self, object: T) -> Handle<T>
+    where Object: SuperclassOf<T> {
+        let addr = self.next_handle_addr;
+        self.next_handle_addr = self.next_handle_addr.checked_add(1)
+            .expect("out of handles");
+        let handle = Handle::from(addr);
+        self.objects.insert(&handle, object);
+        handle
+    }
+
+    /// Duplicates the given handle and returns a new handle referring to the
+    /// same object.
+    ///
+    /// Returns an error if `src` isn't associated with a kernel object of type
+    /// `T`.
+    pub fn dup_handle<T>(&mut self, src: &Handle<T>) -> Result<Handle<T>, ()>
+    where Object: SuperclassOf<T> {
+        let mut new = self.alloc_handle();
+        self.objects.dup(src, &mut new)?;
+        Ok(new)
+    }
+
+    /// Closes a handle to an object.
+    ///
+    /// If other handles to the object exist, the object will be kept alive. If
+    /// this is the last remaining handle to the object, the object will be
+    /// destroyed.
+    pub fn close_handle<T>(&mut self, handle: Handle<T>) -> Result<(), ()> {
+        self.objects.remove(handle)
     }
 
     /// Perform an HLE call. Called by the interpreter.
@@ -268,7 +270,7 @@ impl Kernel {
                                     trace!("{}{:?}", stringify!($func), args);
                                     syscall.$func(args).into_u32()
                                 } )*
-                                _ => unimplemented!("HLE function #{}", ordinal),
+                                _ => unimplemented!("HLE function #{} (please add a dispatch entry)", ordinal),
                             }
                         };
                     }
@@ -289,7 +291,7 @@ impl Kernel {
                 Err(format!("attempted HLE call to unused export ID {}", ordinal).into())
             }
             KernelExportKind::Unimplemented => {
-                unimplemented!("HLE function #{}", ordinal);
+                unimplemented!("HLE function #{} (please add an entry to the export table)", ordinal);
             }
         }
     }

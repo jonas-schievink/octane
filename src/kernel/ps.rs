@@ -2,12 +2,13 @@
 
 use memory::VirtualMemory;
 use kernel::types::*;
-use super::HandleSet;
 use cpu::State;
 
 use std::u32;
 
 /// Process and thread management subsystem.
+///
+/// `kernel.ps`.
 #[derive(Debug)]
 pub struct Subsystem {
     next_thread_id: u32,
@@ -15,9 +16,8 @@ pub struct Subsystem {
     ///
     /// This starts out with just the program's main thread. The program can
     /// launch other threads via `PsCreateSystemThread(Ex)`.
-    threads: HandleSet<Thread>,
-    /// Handle of the currently active thread.
-    current_thread: Handle<Thread>,
+    threads: Vec<Handle<Thread>>,
+    current_thread: usize,
 }
 
 impl Subsystem {
@@ -29,35 +29,37 @@ impl Subsystem {
     pub fn init() -> Self {
         Self {
             next_thread_id: 0,
-            threads: HandleSet::new(),
-            current_thread: Handle::from(0),    // starts out invalid
+            threads: Vec::new(),
+            current_thread: 0,    // starts out invalid, later points to first thread
         }
     }
+}
 
+impl super::Kernel {
     /// Registers a new thread with the process subsystem.
     ///
     /// If no thread is currently registered, this thread will also be made
     /// active.
-    pub fn register_thread(&mut self, handle: Handle<Thread>, mut thread: Thread) -> &mut Thread {
-        if self.current_thread.raw_addr() == 0 {
-            // first thread = main thread = initially active thread
-            self.current_thread = handle.clone();
-        }
-        thread.id = self.next_thread_id;
-        self.next_thread_id += 1;
-        self.threads.insert(handle, thread)
-    }
+    ///
+    /// Note that closing the returned handle will not cancel the thread. An
+    /// internal handle is created that keeps the thread alive.
+    pub fn register_thread(&mut self, mut thread: Thread) -> Handle<Thread> {
+        thread.id = self.ps.next_thread_id;
+        self.ps.next_thread_id += 1;
 
-    /// Try to get the thread referred to by `handle`.
-    pub fn thread(&self, handle: Handle<Thread>) -> Option<&Thread> {
-        self.threads.get(handle)
+        let handle = self.register_object(thread);
+        let internal = self.dup_handle(&handle).expect("handle should be valid");
+        self.ps.threads.push(internal);
+
+        handle
     }
 
     /// Get a reference to the currently active thread.
     ///
-    /// This cannot normally fail since at least one thread usually exists.
+    /// This cannot normally fail since at least one thread usually exists. If
+    /// not, this method will panic.
     pub fn current_thread(&self) -> &Thread {
-        self.thread(self.current_thread.clone()).expect("current thread doesn't exist")
+        self.objects.get(&self.ps.threads[self.ps.current_thread]).expect("current thread doesn't exist")
     }
 }
 
@@ -198,7 +200,6 @@ impl<'a, M: VirtualMemory> super::Syscall<'a, M> {
         esp -= 4;
         self.mem.store_u32(esp, !0)?;
 
-        let handle = self.kernel.alloc_handle();
         let mut thread = Thread::new(start_routine.raw_addr(), stack_start, *stack_size);
         {
             // Adjust esp and set ebp
@@ -211,12 +212,13 @@ impl<'a, M: VirtualMemory> super::Syscall<'a, M> {
         }
 
         // Register thread, allocate thread ID
-        let thread = self.kernel.ps.register_thread(handle.clone(), thread);
+        let handle = self.kernel.register_thread(thread);
+        let id = self.kernel.objects.get::<Thread>(&handle).unwrap().id();
 
         // Write back ID and handle
         self.mem.store_u32(thread_handle.raw_addr(), handle.raw_addr())?;
         if thread_id.raw_addr() != 0 {
-            self.mem.store_u32(thread_id.raw_addr(), thread.id())?;
+            self.mem.store_u32(thread_id.raw_addr(), id)?;
         }
 
         Ok(())
