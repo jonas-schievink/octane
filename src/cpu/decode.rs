@@ -422,6 +422,8 @@ impl<'a, M: VirtualMemory> Decoder<'a, M> {
 
                 Instr::StrMem { op: StrMemOp::Stos, rep, size }
             }
+            0xFA => Instr::Cli,
+            0xFB => Instr::Sti,
             0xFE => {
                 // Inc/Dec group 4
                 let size = OpSize::Bits8;

@@ -117,6 +117,8 @@ pub fn walk_instr<V: Visitor + ?Sized>(v: &mut V, instr: &Instr) {
         }
         Leave { .. }
         | IntO
+        | Cli
+        | Sti
         | StrMem { .. }
         | Cwd
         | Cdq => {},    // no operands
@@ -163,6 +165,8 @@ fn prefixes(instr: &Instr) -> Vec<&'static str> {
         | Int { .. }
         | BitScan { .. }
         | IntO
+        | Cli
+        | Sti
         | Cwd
         | Cdq => vec![],  // prefixes don't need display or are unsupported
         StrMem { rep: true, .. } => vec!["rep"],
@@ -238,6 +242,8 @@ fn mnemonic(instr: &Instr) -> String {
         Leave { .. } => "leave",
         Int { .. } => "int",
         IntO => "into",
+        Cli => "cli",
+        Sti => "sti",
         Cwd => "cwd",
         Cdq => "cdq",
     };

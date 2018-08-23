@@ -261,6 +261,17 @@ pub enum Instr {
     /// Does not read or modify any flags.
     Cdq,
 
+    /// Clear interrupt enable flag.
+    ///
+    /// This disables maskable external interrupts. NMIs and exceptions are not
+    /// and cannot be disabled.
+    Cli,
+
+    /// Set interrupt enable flag.
+    ///
+    /// Enables interrupts after the *next instruction*.
+    Sti,
+
     /// Remove the procedure's stack frame.
     ///
     /// Equivalent to:
