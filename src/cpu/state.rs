@@ -4,6 +4,10 @@ use cpu::instr::{Register, Immediate};
 use cpu::Flags;
 
 /// CPU state consisting of the emulated registers.
+///
+/// For multithreading, all inactive threads have this state backed up in the
+/// kernel. Switching threads amounts to storing the current CPU state in the
+/// kernel and restoring the activated thread's CPU state.
 #[derive(Debug, Clone)]
 pub struct State {
     eax: u32,
@@ -19,6 +23,10 @@ pub struct State {
     eip: u32,
 
     flags: Flags,
+
+    /// Base address of the `fs` segment. This is the linear address of the
+    /// thread information/environment block (TIB/TEB).
+    fs_base: u32,
 }
 
 impl State {
@@ -41,9 +49,11 @@ impl State {
             esp,
             eip,
             flags: Flags::empty(),
+            fs_base: 0,
         }
     }
 
+    /// Returns a reference to the status flags.
     pub fn flags(&self) -> &Flags { &self.flags }
 
     /// Sets all status flags `flags` to the value of `bit`.
@@ -82,6 +92,12 @@ impl State {
             Esp => self.esp().into(),
         }
     }
+
+    /// Retrieve the base address of the `fs` segment.
+    pub fn fs_base(&self) -> u32 { self.fs_base }
+
+    /// Sets the base address of the `fs` segment.
+    pub fn set_fs_base(&mut self, base: u32) { self.fs_base = base; }
 }
 
 /// Generates accessor methods for registers and their subregisters.
