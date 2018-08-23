@@ -9,6 +9,10 @@ use num_traits::FromPrimitive;
 impl<'a, M: VirtualMemory> super::Syscall<'a, M> {
     /// Converts an `NTSTATUS` code to the corresponding system error code.
     ///
+    /// This is mostly an approximation/guesswork since the real mapping is not
+    /// (easily) available. No game should rely on this, however (famous last
+    /// words).
+    ///
     /// See Microsoft docs on [`RtlNtStatusToDosError`][msdocs] and [system
     /// error codes][syserr].
     ///
