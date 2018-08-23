@@ -208,6 +208,16 @@ impl<H: Hooks, M: VirtualMemory> Interpreter<H, M> {
                 let value = self.eval_operand(src)?;
                 self.store_to_operand(dest, value)?;
             }
+            MovZx { dest, src } => {
+                let value = self.eval_operand(src)?;
+                let value = value.zero_ext_to(dest.size());
+                self.store_to_operand(&Operand::from(*dest), value)?;
+            }
+            MovSx { dest, src } => {
+                let value = self.eval_operand(src)?;
+                let value = value.sign_ext_to(dest.size());
+                self.store_to_operand(&Operand::from(*dest), value)?;
+            }
             JumpIf { cc, target } => {
                 if self.eval_cc(*cc) {
                     // FIXME do the side effects happen when `cc` is false?
