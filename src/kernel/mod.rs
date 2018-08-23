@@ -29,6 +29,7 @@
 // FIXME: Remove all references that claim that the kernel is based on WinNT/2000
 
 mod mm;
+mod nt;
 mod ps;
 mod rtl;
 mod table;
@@ -64,6 +65,7 @@ pub struct Kernel {
 
     ps: ps::Subsystem,
     mm: mm::Subsystem,
+    nt: nt::Subsystem,
 }
 
 impl Kernel {
@@ -80,6 +82,7 @@ impl Kernel {
             objects: ObjectSet::new(),
             ps: ps::Subsystem::init(),
             mm: mm::Subsystem::init(),
+            nt: nt::Subsystem::init(),
         };
 
         info!("allocating memory for XBE");
@@ -273,16 +276,23 @@ impl Kernel {
                                 $( $ord => {
                                     let args = FromRawArgs::from_args(args);
                                     trace!("{}{:?}", stringify!($func), args);
-                                    syscall.$func(args).into_u32()
+                                    let result = syscall.$func(args);
+                                    trace!("-> {:?}", result);
+                                    result.into_u32()
                                 } )*
-                                _ => unimplemented!("HLE function #{} (please add a dispatch entry)", ordinal),
+                                _ => unimplemented!(
+                                    "HLE function #{} (please implement it and add a dispatch entry)",
+                                    ordinal
+                                ),
                             }
                         };
                     }
 
                     dispatch! {
                         165 => MmAllocateContiguousMemory,
+                        187 => NtClose,
                         255 => PsCreateSystemThreadEx,
+                        301 => RtlNtStatusToDosError,
                     }
                 };
 

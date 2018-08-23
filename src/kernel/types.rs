@@ -147,11 +147,12 @@ impl<T> fmt::Debug for Handle<T> {
 /// APIs.
 // FIXME: These are taken from https://msdn.microsoft.com/en-us/library/cc704588.aspx
 // check if those are the same on Xbox.
-#[allow(bad_style)]
-#[derive(Debug)]
+#[allow(non_camel_case_types)]
+#[derive(Debug, FromPrimitive)]
 pub enum NtStatus {
     STATUS_SUCCESS = 0x00000000,
     STATUS_ACCESS_VIOLATION = 0xC0000005,
+    STATUS_INVALID_HANDLE = 0xC0000008,
     STATUS_NO_MEMORY = 0xC0000017,
 }
 
@@ -179,6 +180,24 @@ impl From<memory::MemoryError> for NtStatus {
     }
 }
 
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+pub enum SysError {
+    ERROR_SUCCESS = 0,
+    ERROR_INVALID_HANDLE = 6,
+    ERROR_OUTOFMEMORY = 14,
+    /// Returned by `RtlNtStatusToDosError` when the `NTSTATUS` is invalid or
+    /// unknown.
+    ERROR_MR_MID_NOT_FOUND = 317,
+    ERROR_INVALID_ADDRESS = 487,
+}
+
+impl Into<u32> for SysError {
+    fn into(self) -> u32 {
+        self as u32
+    }
+}
+
 /// Trait for return types of API functions.
 ///
 /// All return values eventually end up as a `u32` stored in the `eax` register,
@@ -203,6 +222,12 @@ impl<S> ApiReturnValue for S
 where S: Into<NtStatus> {
     fn into_u32(self) -> u32 {
         self.into().into()
+    }
+}
+
+impl ApiReturnValue for SysError {
+    fn into_u32(self) -> u32 {
+        self.into()
     }
 }
 

@@ -1,4 +1,4 @@
-//! Enum definitions from the Intel manual.
+//! Enum definitions from the Intel manual (currently unused).
 //!
 //! Most of the documentation is straight from Intel's own manual:
 //!

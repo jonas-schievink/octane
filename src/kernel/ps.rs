@@ -121,6 +121,10 @@ impl Thread {
         self.state = state;
     }
 
+    /// Gets the ID of this thread.
+    ///
+    /// While multiple handles referring to the same thread can be created, the
+    /// thread ID is always unique.
     pub fn id(&self) -> u32 {
         self.id
     }
