@@ -28,11 +28,11 @@
 //!   dispatch the function's ID to the implementation you just created.
 // FIXME: Remove all references that claim that the kernel is based on WinNT/2000
 
-pub mod mm;
-pub mod ps;
-pub mod rtl;
-pub mod table;
-pub mod object;
+mod mm;
+mod ps;
+mod rtl;
+mod table;
+mod object;
 pub mod types;
 
 use self::table::{KernelExportKind, KernelAbi};
@@ -189,7 +189,12 @@ impl Kernel {
     /// this is the last remaining handle to the object, the object will be
     /// destroyed.
     pub fn close_handle<T>(&mut self, handle: Handle<T>) -> Result<(), ()> {
-        self.objects.remove(handle)
+        if let Some(object) = self.objects.remove(handle)? {
+            // get rid of the object
+            object.destroy(self);
+        }
+
+        Ok(())
     }
 
     /// Perform an HLE call. Called by the interpreter.

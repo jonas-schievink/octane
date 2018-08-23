@@ -87,20 +87,20 @@ impl ObjectSet {
     /// If the reference count reaches 0, the object will be destroyed.
     ///
     /// Returns an error if the handle is not associated with an object.
-    pub fn remove<T>(&mut self, handle: Handle<T>) -> Result<(), ()> {
+    pub fn remove<T>(&mut self, handle: Handle<T>) -> Result<Option<Object>, ()> {
         let index = self.map.remove(&handle.raw_addr()).ok_or(())?;
         {
             // slightly contorted control flow to avoid double lookup
             let obj = &mut self.objects[index];
             if obj.refcount > 1 {
                 obj.refcount -= 1;
-                return Ok(());
+                return Ok(None);
             }
         }
 
         // last reference, destroy the object
-        self.objects.remove(index);
-        Ok(())
+        let entry = self.objects.remove(index).unwrap();
+        Ok(Some(entry.object))
     }
 
     /// Obtain a reference to the object referred to by `handle`.
@@ -121,6 +121,20 @@ impl ObjectSet {
 pub enum Object {
     Thread(Thread),
     Dummy,
+}
+
+impl Object {
+    /// The last handle to the object was closed, destroy it.
+    pub fn destroy(self, _kernel: &mut super::Kernel) {
+        match self {
+            Object::Thread(_) => {
+                // we don't have to do anything for threads since they can only
+                // be destroyed via `PsTerminateSystemThread` which does
+                // everything it needs to.
+            }
+            Object::Dummy => {}
+        }
+    }
 }
 
 /// Trait for types that can be cast to a more specific type `T`.
