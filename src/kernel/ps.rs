@@ -130,6 +130,28 @@ impl Thread {
     }
 }
 
+/// The thread environment block (TEB).
+///
+/// This is still in need of documentation. If you know what certain fields are
+/// used for, please contribute some documentation. Existing documentation,
+/// field names or types might also be incorrect.
+///
+/// The first 3 fields are equivalent to the fields of the Win32 TEB. The total
+/// size of the Xbox TEB is at least 44 Bytes. This was determined from the
+/// occurrence of 32-bit `mov`s with an offset of `0x28` (40 Bytes).
+#[repr(C, packed)]
+#[allow(unused)]    // FIXME
+struct Teb {
+    /// `0x00`: Pointer to the SEH record list.
+    seh_record: XPtr<()>,
+    /// `0x04`: First address past the allocated stack (high address).
+    stack_base: u32,
+    /// `0x08`: Lowest address allocated for the stack.
+    stack_limit: u32,
+
+    unknown: [u8; 44 - 3*4],
+}
+
 #[allow(non_snake_case)]
 impl<'a, M: VirtualMemory> super::Syscall<'a, M> {
     /// Spawn a new kernel/system level thread.
@@ -226,5 +248,18 @@ impl<'a, M: VirtualMemory> super::Syscall<'a, M> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::size_of;
+
+    #[test]
+    fn teb_size() {
+        // If you change the size of `Teb`, adjust this test and the doc comment
+        // on `Teb` accordingly.
+        assert_eq!(size_of::<Teb>(), 44);
     }
 }

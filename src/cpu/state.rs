@@ -25,7 +25,7 @@ pub struct State {
     flags: Flags,
 
     /// Base address of the `fs` segment. This is the linear address of the
-    /// thread information/environment block (TIB/TEB).
+    /// thread environment block (TEB).
     fs_base: u32,
 }
 
