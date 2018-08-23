@@ -94,7 +94,7 @@ impl Kernel {
         this.mm.allocate_exact_range(HANDLE_START..=0xffffffff)?;
 
         // Map the XBE headers at the specified base address
-        let xbe_range = xbe.base_address()..=xbe.base_address()+xbe.header_size();
+        let xbe_range = xbe.base_address()..=xbe.base_address()+xbe.header_size()-1;
         this.mm.allocate_exact_range(xbe_range.clone())?;
         mem.add_mapping(xbe_range, &xbe.raw_data()[..xbe.header_size() as usize], "<xbe headers>")?;
 
