@@ -1,14 +1,14 @@
-extern crate xe;
+extern crate octane;
 extern crate xbe;
 extern crate env_logger;
 extern crate termcolor;
 extern crate log;
 #[macro_use] extern crate structopt;
 
-use xe::cpu::disasm::TermPrinter;
-use xe::cpu::interpret::Interpreter;
-use xe::memory::MmapMemory;
-use xe::kernel::Kernel;
+use octane::cpu::disasm::TermPrinter;
+use octane::cpu::interpret::Interpreter;
+use octane::memory::MmapMemory;
+use octane::kernel::Kernel;
 use xbe::Xbe;
 
 use structopt::StructOpt;
@@ -18,7 +18,7 @@ use std::error::Error;
 use std::path::PathBuf;
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "xe", about = "Xbox emulator.")]
+#[structopt(name = "octane", about = "Xbox emulator.")]
 struct Opt {
     /// Path to the XBE file to run.
     #[structopt(parse(from_os_str))]

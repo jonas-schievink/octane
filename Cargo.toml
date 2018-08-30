@@ -1,11 +1,11 @@
 [package]
-name = "xe"
+name = "octane"
 version = "0.1.0"
 authors = ["Jonas Schievink <jonasschievink@gmail.com>"]
 # TODO: Write description
 #description = ""
-documentation = "https://docs.rs/xe/"
-repository = "https://github.com/jonas-schievink/xe.git"
+documentation = "https://docs.rs/octane/"
+repository = "https://github.com/jonas-schievink/octane.git"
 # TODO: Add up to 5 keywords
 #keywords = []
 # TODO: Add categories
@@ -54,11 +54,11 @@ replace = "## Unreleased\n\nNo changes.\n\n## {{version}} - {{date}}"
 # Bump the version inside the example manifest in `README.md`
 [[package.metadata.release.pre-release-replacements]]
 file    = "README.md"
-search  = 'xe = "[a-z0-9\\.-]+"'
-replace = 'xe = "{{version}}"'
+search  = 'octane = "[a-z0-9\\.-]+"'
+replace = 'octane = "{{version}}"'
 
 # Bump the version referenced by the `html_root_url` attribute in `lib.rs`
 [[package.metadata.release.pre-release-replacements]]
 file    = "src/lib.rs"
-search  = "https://docs.rs/xe/[a-z0-9\\.-]+"
-replace = "https://docs.rs/xe/{{version}}"
+search  = "https://docs.rs/octane/[a-z0-9\\.-]+"
+replace = "https://docs.rs/octane/{{version}}"

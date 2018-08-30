@@ -1,14 +1,14 @@
-extern crate xe;
+extern crate octane;
 extern crate xbe;
 extern crate env_logger;
 extern crate termcolor;
 extern crate log;
 #[macro_use] extern crate structopt;
 
-use xe::cpu::instr::{Instr, Operand};
-use xe::cpu::disasm::{AsmPrinter, FunctionExtentTracker};
-use xe::loader;
-use xe::memory::{MmapMemory, VirtualMemory};
+use octane::cpu::instr::{Instr, Operand};
+use octane::cpu::disasm::{AsmPrinter, TermPrinter, FunctionExtentTracker};
+use octane::loader;
+use octane::memory::{MmapMemory, VirtualMemory};
 use xbe::Xbe;
 
 use structopt::StructOpt;
@@ -21,7 +21,6 @@ use std::io::Write;
 use std::str::FromStr;
 use std::num::ParseIntError;
 use std::collections::HashSet;
-use xe::cpu::disasm::TermPrinter;
 
 /// Parse a number that might be hexadecimal.
 fn parse_hex(src: &str) -> Result<u32, ParseIntError> {
@@ -33,7 +32,7 @@ fn parse_hex(src: &str) -> Result<u32, ParseIntError> {
 }
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "xe-disasm", about = "Disassemble code in an XBE image")]
+#[structopt(name = "octane-disasm", about = "Disassemble code in an XBE image")]
 struct Opt {
     /// Select the tool to use for disassembly (nasm or builtin).
     ///
@@ -72,7 +71,7 @@ struct Opt {
 enum Disassembler {
     /// Netwide (dis)assembler (`ndisasm`).
     Nasm,
-    /// Xe's builtin instruction decoder and printer.
+    /// Octane's builtin instruction decoder and printer.
     Builtin,
 }
 

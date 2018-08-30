@@ -1,8 +1,8 @@
-extern crate xe;
+extern crate octane;
 extern crate termcolor;
 
-use xe::cpu::decode::Decoder;
-use xe::memory::ArrayMemory;
+use octane::cpu::decode::Decoder;
+use octane::memory::ArrayMemory;
 
 use termcolor::{ColorChoice, Color, ColorSpec, StandardStream, WriteColor};
 use std::io::Write;

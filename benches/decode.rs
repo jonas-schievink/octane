@@ -1,11 +1,11 @@
 //! Benchmarks instruction decoder performance.
 
 #[macro_use] extern crate criterion;
-extern crate xe;
+extern crate octane;
 
 use criterion::{Benchmark, Criterion, Throughput};
-use xe::cpu::decode::Decoder;
-use xe::memory::{MmapMemory, VirtualMemory};
+use octane::cpu::decode::Decoder;
+use octane::memory::{MmapMemory, VirtualMemory};
 
 /// Test data taken from entry point of Limp Ninja's Demoplayer.
 ///
