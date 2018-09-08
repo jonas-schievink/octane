@@ -66,8 +66,6 @@ impl Subsystem {
     /// At least `bytes` Bytes will be allocated, but only whole 4K pages can be
     /// allocated.
     pub fn allocate(&mut self, bytes: u32) -> Result<RangeInclusive<u32>, AllocError> {
-        trace!("allocate({})", bytes);
-
         // naive first-fit allocator
         let bytes = round_up_to_page(bytes);
 
@@ -75,8 +73,10 @@ impl Subsystem {
         if let Some(free_range) = free_range {
             let alloc_range = free_range.1.start()..=free_range.1.start()+bytes-1;
             self.alloc_exact_replace(alloc_range.clone(), free_range.0);
+            trace!("allocate({}) -> {:#X}..={:#X}", bytes, alloc_range.start(), alloc_range.end());
             Ok(alloc_range)
         } else {
+            trace!("allocate({}) -> OOM", bytes);
             Err(AllocError(Request::Bytes(bytes)))
         }
     }

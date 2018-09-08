@@ -47,7 +47,11 @@ impl super::Kernel {
         thread.id = self.ps.next_thread_id;
         self.ps.next_thread_id += 1;
 
+        trace!("register_thread: {:?}", thread);
+        let state = thread.saved_state();
+        trace!("register_thread: entry={:#010X} ebp={:#010X} esp={:#010X} stack_start={:#010X}", state.eip(), state.ebp(), state.esp(), thread.stack_start);
         let handle = self.register_object(thread);
+        info!("new thread registered as {:?}", handle);
         let internal = self.dup_handle(&handle).expect("handle should be valid");
         self.ps.threads.push(internal);
 
@@ -98,7 +102,6 @@ impl Thread {
     /// * `stack_start`: Lowest address part of the allocated stack.
     /// * `stack_len`: Stack size in bytes.
     pub fn new(entry: u32, stack_start: u32, stack_len: u32) -> Self {
-        info!("new thread @{:#010X}", entry);
         let stack_end = stack_start + stack_len;
         Self {
             id: u32::MAX,
@@ -150,6 +153,10 @@ struct Teb {
     stack_limit: u32,
 
     unknown: [u8; 44 - 3*4],
+
+    // Other offsets of interest:
+    // 0x20, 0x24, 0x28
+    // 0x28 is a pointer to a structure seemingly related to SEH or debugging?
 }
 
 #[allow(non_snake_case)]
@@ -242,6 +249,7 @@ impl<'a, M: VirtualMemory> super::Syscall<'a, M> {
         let id = self.kernel.objects.get::<Thread>(&handle).unwrap().id();
 
         // Write back ID and handle
+        trace!("handle {:?} -> {:?}", handle, thread_handle);
         self.mem.store_u32(thread_handle.raw_addr(), handle.raw_addr())?;
         if thread_id.raw_addr() != 0 {
             self.mem.store_u32(thread_id.raw_addr(), id)?;

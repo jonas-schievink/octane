@@ -75,6 +75,10 @@ pub struct XPtr<T> {
 }
 
 impl<T> XPtr<T> {
+    /// Returns the address this pointer points to.
+    ///
+    /// This address is controlled by the emulated program and might not be
+    /// aligned, mapped or accessible.
     pub fn raw_addr(&self) -> u32 {
         self.addr
     }
@@ -123,6 +127,9 @@ pub struct Handle<T> {
 
 impl<T> Handle<T> {
     /// The raw address as seen by the emulated program.
+    ///
+    /// This address is not accessible by the program and must not be allocated
+    /// by the kernel. It only serves as an index into a table on the host.
     pub fn raw_addr(&self) -> u32 {
         self.addr
     }
