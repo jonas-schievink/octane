@@ -56,6 +56,8 @@ impl State {
     /// Returns a reference to the status flags.
     pub fn flags(&self) -> &Flags { &self.flags }
 
+    pub fn set_flags(&mut self, flags: Flags) { self.flags = flags; }
+
     /// Sets all status flags `flags` to the value of `bit`.
     pub fn update_flags(&mut self, flags: Flags, bit: bool) {
         self.flags.set(flags, bit);

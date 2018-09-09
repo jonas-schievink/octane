@@ -14,8 +14,10 @@ extern crate core;
 extern crate memmap;
 extern crate termcolor;
 extern crate generational_arena;
+extern crate gdbstub;
 
 pub mod cpu;
 pub mod loader;
 pub mod memory;
 pub mod kernel;
+mod utils;

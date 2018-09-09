@@ -11,6 +11,28 @@ use std::fmt;
 use std::error::Error;
 use num_traits::PrimInt;
 use num_traits::Signed;
+use utils::NoDebug;
+use cpu::ExecutionEngine;
+
+/// Provides an interface to trace execution of individual instructions.
+pub trait Trace<H: Hooks, M: VirtualMemory> {
+    /// Called after an instruction has been decoded from the instruction
+    /// stream, but before it is executed.
+    ///
+    /// # Parameters
+    ///
+    /// * `interp`: The interpreter, holding the CPU state and memory.
+    /// * `eip`: Address of the instruction to be executed.
+    /// * `instr`: The instruction decoded from memory address `eip`.
+    fn trace(&mut self, interp: &mut Interpreter<H, M>, eip: u32, instr: &Instr);
+}
+
+impl<T, H: Hooks, M: VirtualMemory> Trace<H, M> for T
+where T: for<'a> FnMut(&'a mut Interpreter<H, M>, u32, &'a Instr) {
+    fn trace(&mut self, interp: &mut Interpreter<H, M>, eip: u32, instr: &Instr) {
+        self(interp, eip, instr);
+    }
+}
 
 /// Provides instruction hooks that can alter the interpreter's behaviour.
 pub trait Hooks: Sized {
@@ -77,27 +99,34 @@ impl Hooks for NoHooks {}
 
 /// The x86 instruction interpreter.
 #[derive(Debug)]
-pub struct Interpreter<H: Hooks, M: VirtualMemory> {
+pub struct Interpreter<'t, H: Hooks, M: VirtualMemory> {
     /// CPU state (registers).
     pub state: State,
     /// Virtual memory.
     pub mem: M,
     hooks: Option<Box<H>>,
+    tracer: Option<NoDebug<Box<Trace<H, M> + 't>>>,
 }
 
-impl<H: Hooks, M: VirtualMemory> Interpreter<H, M> {
+impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
     /// Creates a new interpreter.
     ///
     /// # Parameters
     ///
     /// * `mem`: The virtual memory space to operate on.
+    /// * `state`: Initial CPU state.
     /// * `hooks`: A `Hooks` implementor.
     pub fn new(mem: M, state: State, hooks: H) -> Self {
         Self {
             state,
             mem,
             hooks: Some(Box::new(hooks)),
+            tracer: None,
         }
+    }
+
+    pub fn set_tracer<T: Trace<H, M> + 't>(&mut self, tracer: T) {
+        self.tracer = Some(NoDebug(Box::new(tracer)));
     }
 
     pub fn state(&self) -> &State {
@@ -120,13 +149,20 @@ impl<H: Hooks, M: VirtualMemory> Interpreter<H, M> {
     /// Fetch, decode and execute the next instruction.
     pub fn step(&mut self) -> Result<(), InterpreterError> {
         // fetch and decode next instruction
-        let instr = {
+        let (instr, new_eip) = {
             let mut decoder = Decoder::new(&self.mem, self.state.eip());
             let instr = decoder.decode_next()?;
             // FIXME this is not necessarily correct when faults happen
-            self.state.set_eip(decoder.current_address());
-            instr
+            (instr, decoder.current_address())
         };
+
+        if let Some(mut tracer) = self.tracer.take() {
+            tracer.trace(self, new_eip, &instr);
+            self.tracer = Some(tracer);
+        }
+
+        // FIXME: This is wrong when an exception occurs
+        self.state.set_eip(new_eip);
 
         self.execute(&instr)
     }
@@ -536,6 +572,25 @@ impl<H: Hooks, M: VirtualMemory> Interpreter<H, M> {
         let result = f(self, &mut hooks);
         self.hooks = Some(hooks);
         result
+    }
+}
+
+impl<'t, H: Hooks, M: VirtualMemory> ExecutionEngine for Interpreter<'t, H, M> {
+    type Memory = M;
+    type Error = InterpreterError;
+
+    fn state(&mut self) -> &mut State { &mut self.state }
+
+    fn memory(&mut self) -> &mut Self::Memory { &mut self.mem }
+
+    fn step(&mut self) -> Result<(), Self::Error> {
+        self.step()
+    }
+
+    fn run(&mut self) -> Result<(), Self::Error> {
+        loop {
+            self.step()?;
+        }
     }
 }
 

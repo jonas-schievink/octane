@@ -25,6 +25,10 @@ termcolor = "1.0.1"
 memmap = "0.6.2"
 generational-arena = "0.1.0"
 
+[dependencies.gdbstub]
+git = "https://github.com/jonas-schievink/gdbstub.git"
+rev = "36b2838ada2015d449c93e1e2946b1d9378e4781"
+
 [dev-dependencies]
 version-sync = "0.5"
 criterion = "0.2.4"

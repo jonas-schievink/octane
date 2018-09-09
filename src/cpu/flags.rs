@@ -37,6 +37,18 @@ bitflags! {
     }
 }
 
+impl Flags {
+    /// Converts the `Flags` value to the corresponding EFLAGS register value.
+    pub fn to_eflags(&self) -> u32 {
+        // FIXME Model interrupt enable flag - games do use cli/sti
+        self.bits()
+    }
+
+    pub fn from_eflags(eflags: u32) -> Self {
+        Self::from_bits_truncate(eflags)
+    }
+}
+
 // prototypal table-based decoder flags, doesn't really belong in here but w/e
 bitflags! {
     struct OpFlags: u16 {
