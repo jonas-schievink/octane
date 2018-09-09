@@ -125,6 +125,8 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
         }
     }
 
+    /// Register a tracer object that will be called before each instruction is
+    /// executed.
     pub fn set_tracer<T: Trace<H, M> + 't>(&mut self, tracer: T) {
         self.tracer = Some(NoDebug(Box::new(tracer)));
     }
@@ -157,7 +159,8 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
         };
 
         if let Some(mut tracer) = self.tracer.take() {
-            tracer.trace(self, new_eip, &instr);
+            let eip = self.state.eip();
+            tracer.trace(self, eip, &instr);
             self.tracer = Some(tracer);
         }
 
@@ -361,6 +364,14 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
                         self.state.set_eax(quot as u32);
                         self.state.set_edx(rem as u32);
                     }
+                }
+            }
+            Int { vector } => {
+                if *vector == 3 {
+                    // debugger breakpoint
+                    return Err(InterpreterError::Breakpoint);
+                } else {
+                    panic!("unhandled interrupt vector {}", vector);
                 }
             }
             Cwd => {
@@ -659,6 +670,8 @@ pub enum InterpreterError {
     Hook(HookError),
     /// `#DE` was raised by a division instruction.
     DivisionException,
+    /// An `int3` was hit.
+    Breakpoint,
 }
 
 impl From<DecoderError> for InterpreterError {
@@ -686,6 +699,7 @@ impl fmt::Display for InterpreterError {
             InterpreterError::Memory(err) => err.fmt(f),
             InterpreterError::Hook(err) => err.fmt(f),
             InterpreterError::DivisionException => write!(f, "division exception"),
+            InterpreterError::Breakpoint => write!(f, "hit breakpoint"),
         }
     }
 }
