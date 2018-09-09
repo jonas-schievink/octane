@@ -69,6 +69,7 @@ fn run() -> Result<(), Box<Error>> {
 
         let stub = GdbStub::new(stream, dbg);
         stub.poll()?;
+        println!("Debugger closed connection. Exiting.");
     } else {
         interpreter.run()?;
     }

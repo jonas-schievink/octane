@@ -2,6 +2,10 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 /// Wraps any value and suppresses its debug output when printed with `{:?}`.
+///
+/// This can be used when the debug output would be prohibitively large or when
+/// the underlying type doesn't implement `Debug` at all but is embedded into a
+/// larger structure that *should* implement `Debug`.
 pub struct NoDebug<T>(pub T);
 
 impl<T> fmt::Debug for NoDebug<T> {
