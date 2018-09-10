@@ -367,6 +367,27 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
                     }
                 }
             }
+            Inc { operand } |
+            Dec { operand } => {
+                let inc = if let Inc { .. } = instr { true } else { false };
+                let value = self.eval_operand(operand)?;
+                let offset = if inc { 1 } else { -1 };
+                let new_value = match value {
+                    Immediate::Imm8(i) => Immediate::Imm8(i.wrapping_add(offset)),
+                    Immediate::Imm16(i) => Immediate::Imm16(i.wrapping_add(offset.into())),
+                    Immediate::Imm32(i) => Immediate::Imm32(i.wrapping_add(offset.into())),
+                };
+                self.store_to_operand(operand, new_value)?;
+
+                let (lhs, rhs, res) = (value.sign_extended(), offset.into(), new_value.sign_extended());
+                if inc {
+                    self.update_of_after_addition(lhs, rhs, res);
+                } else {
+                    self.update_of_after_subtraction(lhs, rhs, res);
+                }
+                self.update_sfzfpf(new_value);
+                // TODO adjust flag
+            }
             Int { vector } => {
                 if *vector == 3 {
                     // debugger breakpoint
