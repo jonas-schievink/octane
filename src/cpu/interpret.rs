@@ -283,8 +283,9 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
                 self.state.set_esp(esp + 4 + u32::from(*pop));
                 self.state.set_eip(return_addr);
             }
-            Push { operand } => {
+            Push { operand } => {   // FIXME <- bug in here
                 let value = self.eval_operand(operand)?;
+                trace!("push {}: {:#X}", value.size(), value);
                 self.push(value)?;
             }
             Pop { operand } => {
@@ -398,11 +399,13 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
             Operand::Imm(imm) => *imm,
             Operand::Mem(loc) => {
                 let addr = self.eval_address(loc);
-                match loc.size {
+                let value = match loc.size {
                     OpSize::Bits8 => self.mem.load(addr)?.into(),
                     OpSize::Bits16 => self.mem.load_i16(addr)?.into(),
                     OpSize::Bits32 => self.mem.load_i32(addr)?.into(),
-                }
+                };
+                trace!("eval_operand: loc {:?}={:#010X}: {} value={:#X}", loc, addr, loc.size, value);
+                value
             }
         })
     }
@@ -427,7 +430,7 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
 
         if let Addressing::Sib { scale, index, .. } = loc.addressing {
             let index = index.map(|reg| self.state.get_register(reg).zero_extended()).unwrap_or(0);
-            index * u32::from(scale)
+            base + index * u32::from(scale)
         } else {
             base
         }
