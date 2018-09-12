@@ -264,6 +264,10 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
                     self.state.set_eip(addr);
                 }
             }
+            Jump { target } => {
+                let addr = self.eval_operand(target)?.zero_extended();
+                self.state.set_eip(addr);
+            }
             Call { target } => {
                 let target = self.eval_operand(target)?.as_u32()
                     .expect("call target not 32-bit?");
@@ -271,6 +275,7 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
 
                 match self.with_hooks(|interp, hooks| hooks.call(interp, eip, target))? {
                     HookAction::Continue => {
+                        trace!("call: esp={:#010X}, push eip={:#010X}, target={:#010X}", self.state.esp(), eip, target);
                         self.push(eip.into())?;
                         self.state.set_eip(target);
                     }
@@ -280,8 +285,10 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
             Ret { pop } => {
                 let esp = self.state.esp();
                 let return_addr = self.mem.load_i32(esp)? as u32;
-                self.state.set_esp(esp + 4 + u32::from(*pop));
+                let new_esp = esp + 4 + u32::from(*pop);
+                self.state.set_esp(new_esp);
                 self.state.set_eip(return_addr);
+                trace!("ret: esp={:#010X}, return={:#010X}, new esp={:#010X}", esp, return_addr, new_esp);
             }
             Push { operand } => {   // FIXME <- bug in here
                 let value = self.eval_operand(operand)?;
