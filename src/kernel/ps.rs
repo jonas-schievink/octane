@@ -49,9 +49,9 @@ impl super::Kernel {
 
         trace!("register_thread: {:?}", thread);
         let state = thread.saved_state();
-        trace!("register_thread: entry={:#010X} ebp={:#010X} esp={:#010X} stack_start={:#010X}", state.eip(), state.ebp(), state.esp(), thread.stack_start);
+        info!("register_thread: entry={:#010X} ebp={:#010X} esp={:#010X} stack_start={:#010X}", state.eip(), state.ebp(), state.esp(), thread.stack_start);
         let handle = self.register_object(thread);
-        info!("new thread registered as {:?}", handle);
+        info!("-> handle={:?}", handle);
         let internal = self.dup_handle(&handle).expect("handle should be valid");
         self.ps.threads.push(internal);
 
