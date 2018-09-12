@@ -77,7 +77,10 @@ fn run() -> Result<(), Box<Error>> {
 }
 
 fn main() {
-    env_logger::init();
+    // By default, log all `info!` messages and higher
+    env_logger::Builder::from_default_env()
+        .filter(None, log::LevelFilter::Info)
+        .init();
 
     match run() {
         Ok(()) => {},
