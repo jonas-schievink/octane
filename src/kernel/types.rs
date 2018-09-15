@@ -1,6 +1,7 @@
 //! Defines types, traits and conversions for kernel variables and function
 //! arguments.
 
+use num_traits::cast::FromPrimitive;
 use std::{fmt, mem};
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -155,12 +156,19 @@ impl<T> fmt::Debug for Handle<T> {
 // FIXME: These are taken from https://msdn.microsoft.com/en-us/library/cc704588.aspx
 // check if those are the same on Xbox.
 #[allow(non_camel_case_types)]
-#[derive(Debug, FromPrimitive)]
+#[derive(Copy, Clone, Debug, FromPrimitive)]
 pub enum NtStatus {
     STATUS_SUCCESS = 0x00000000,
     STATUS_ACCESS_VIOLATION = 0xC0000005,
     STATUS_INVALID_HANDLE = 0xC0000008,
     STATUS_NO_MEMORY = 0xC0000017,
+}
+
+impl NtStatus {
+    /// Converts a raw `u32` NTSTATUS value to a known `NtStatus`.
+    pub fn from_u32(raw: u32) -> Option<Self> {
+        <Self as FromPrimitive>::from_u32(raw)
+    }
 }
 
 impl Into<u32> for NtStatus {

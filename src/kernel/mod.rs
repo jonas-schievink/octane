@@ -46,6 +46,12 @@ use cpu;
 use xbe::Xbe;
 use std::fmt;
 use std::error::Error;
+use kernel::types::NtStatus;
+
+
+/// Magic return address pushed onto the main thread's stack when the kernel
+/// creates it.
+pub static THREAD_EXIT_SENTINEL: u32 = 0xB000_0000;
 
 /// Kernel implementation and host-side data.
 ///
@@ -143,7 +149,11 @@ impl Kernel {
         mem.add_mapping(stack.clone(), &[], "<stack>")
             .expect("couldn't map stack for main thread");
 
-        let thread = ps::Thread::new(entry, *stack.start(), stack_size);
+        let mut thread = ps::Thread::new(entry, *stack.start(), stack_size);
+
+        push(thread.saved_state_mut(), mem, THREAD_EXIT_SENTINEL)
+            .expect("couldn't push exit sentinel");
+
         let handle = self.register_thread(thread);
         self.close_handle(handle)
             .expect("couldn't close extraneous main thread handle");
@@ -154,8 +164,8 @@ impl Kernel {
     /// This is not the current state of the CPU. The state will not update
     /// automatically when the interpreter runs. Updating the saved state
     /// requires a context switch to another thread.
-    pub fn current_thread_state(&self) -> cpu::State {
-        self.current_thread().saved_state()
+    pub fn current_thread_state(&self) -> Option<cpu::State> {
+        self.current_thread().map(|t| t.saved_state())
     }
 
     /// Allocates a new handle that can refer to a value of type `T`.
@@ -197,6 +207,9 @@ impl Kernel {
     /// If other handles to the object exist, the object will be kept alive. If
     /// this is the last remaining handle to the object, the object will be
     /// destroyed.
+    ///
+    /// Returns `Ok` if the handle pointed to a valid object and was closed
+    /// successfully. Returns `Err` if the handle isn't valid.
     pub fn close_handle<T>(&mut self, handle: Handle<T>) -> Result<(), ()> {
         if let Some(object) = self.objects.remove(handle)? {
             // get rid of the object
@@ -229,7 +242,7 @@ impl Kernel {
         cpu: &mut ::cpu::State,
         mem: &mut M,
         addr: u32,
-    ) -> Result<(), HleError> {
+    ) -> Result<HookAction, HleError> {
         if addr < 0x80000000 || addr > 0x800001FF {
             return Err(format!("address {:#010X} not a valid HLE function", addr).into());
         }
@@ -303,7 +316,7 @@ impl Kernel {
                 };
 
                 cpu.set_eax(result);
-                Ok(())
+                Ok(HookAction::Nop)
             }
             KernelExportKind::Variable { .. } => {
                 Err(format!("attempted HLE call to variable (address {:#010X})", addr).into())
@@ -328,10 +341,37 @@ impl Hooks for Kernel {
     ) -> Result<HookAction, HookError> {
         if target > 0x80000000 {
             // Everything in kernel space must be a kernel function.
-            self.do_hle_call(&mut interp.state, &mut interp.mem, target).map_err(|e| {
-                HookError::new(e.to_string())
-            })?;
-            Ok(HookAction::Nop)
+            let action = self
+                .do_hle_call(&mut interp.state, &mut interp.mem, target)
+                .map_err(|e| {
+                    HookError::new(e.to_string())
+                })?;
+            Ok(action)
+        } else {
+            Ok(HookAction::Continue)
+        }
+    }
+
+    fn ret<M: VirtualMemory>(
+        &mut self,
+        interp: &mut Interpreter<Self, M>,
+        target: u32,
+    ) -> Result<HookAction, HookError> {
+        if target == THREAD_EXIT_SENTINEL {
+            Syscall {
+                kernel: self,
+                mem: &mut interp.mem,
+                cpu: &mut interp.state,
+            }.PsTerminateSystemThread((NtStatus::STATUS_SUCCESS.into(),));
+
+            if let Some(thread) = self.current_thread() {
+                // Switch to the new thread
+                interp.state = thread.saved_state();
+                debug!("switched interpreter context to thread #{}: {:?}", thread.id(), interp.state);
+                Ok(HookAction::Nop)
+            } else {
+                Ok(HookAction::Exit)
+            }
         } else {
             Ok(HookAction::Continue)
         }
@@ -344,6 +384,14 @@ fn pop<M: VirtualMemory>(state: &mut ::cpu::State, mem: &M) -> Result<u32, Memor
     let value = mem.load_i32(esp)? as u32;
     state.set_esp(esp + 4);
     Ok(value)
+}
+
+/// Pushes a 32-bit value onto the stack.
+fn push<M: VirtualMemory>(state: &mut ::cpu::State, mem: &mut M, value: u32) -> Result<(), MemoryError> {
+    let esp = state.esp() - 4;
+    mem.store_u32(esp, value)?;
+    state.set_esp(esp);
+    Ok(())
 }
 
 /// Syscall context.

@@ -17,6 +17,7 @@ pub struct Subsystem {
     /// This starts out with just the program's main thread. The program can
     /// launch other threads via `PsCreateSystemThread(Ex)`.
     threads: Vec<Handle<Thread>>,
+    /// Index into `threads` (not a thread ID!).
     current_thread: usize,
 }
 
@@ -44,14 +45,15 @@ impl super::Kernel {
     /// Note that closing the returned handle will not cancel the thread. An
     /// internal handle is created that keeps the thread alive.
     pub fn register_thread(&mut self, mut thread: Thread) -> Handle<Thread> {
-        thread.id = self.ps.next_thread_id;
+        let id = self.ps.next_thread_id;
+        thread.id = id;
         self.ps.next_thread_id += 1;
 
-        trace!("register_thread: {:?}", thread);
+        debug!("register_thread: {:?}", thread);
         let state = thread.saved_state();
-        info!("register_thread: entry={:#010X} ebp={:#010X} esp={:#010X} stack_start={:#010X}", state.eip(), state.ebp(), state.esp(), thread.stack_start);
+        debug!("register_thread: entry={:#010X} ebp={:#010X} esp={:#010X} stack_start={:#010X}", state.eip(), state.ebp(), state.esp(), thread.stack_start);
         let handle = self.register_object(thread);
-        info!("-> handle={:?}", handle);
+        info!("created new thread: id={} handle={:?}", id, handle);
         let internal = self.dup_handle(&handle).expect("handle should be valid");
         self.ps.threads.push(internal);
 
@@ -59,11 +61,43 @@ impl super::Kernel {
     }
 
     /// Get a reference to the currently active thread.
+    pub fn current_thread(&self) -> Option<&Thread> {
+        self.objects.get(&self.ps.threads[self.ps.current_thread])
+    }
+
+    /// Searches the thread list for a runnable thread, starting at the given
+    /// index.
     ///
-    /// This cannot normally fail since at least one thread usually exists. If
-    /// not, this method will panic.
-    pub fn current_thread(&self) -> &Thread {
-        self.objects.get(&self.ps.threads[self.ps.current_thread]).expect("current thread doesn't exist")
+    /// Returns the index into `ps.threads` of the first runnable thread found,
+    /// or `None` if no runnable thread was found.
+    pub fn find_runnable_thread(&mut self, start_index: usize) -> Option<usize> {
+        // Starting at the thread at `start_index`, search the thread list for a
+        // runnable one.
+        let first_part = self.ps.threads.iter().enumerate().skip(start_index);
+        let second_part = self.ps.threads[..start_index].iter().enumerate();
+
+        first_part.chain(second_part).find(|(idx, handle)| {
+            let thread: &Thread = self.objects.get(handle).expect("not a thread handle");
+            if thread.is_runnable() {
+                debug!("found runnable thread at index {}: {:?}", idx, thread);
+                true
+            } else {
+                false
+            }
+        }).map(|(idx, _)| idx)
+    }
+
+    pub fn terminate_current_thread(&mut self) {
+        let handle = self.ps.threads.swap_remove(self.ps.current_thread);
+        self.close_handle(handle).expect("couldn't close handle to current thread");
+
+        let start_idx = self.ps.current_thread+1;
+        if let Some(idx) = self.find_runnable_thread(start_idx) {
+            self.ps.current_thread = idx;
+        } else {
+            info!("last runnable thread exited");
+            self.ps.current_thread = 0;
+        }
     }
 }
 
@@ -122,6 +156,14 @@ impl Thread {
 
     pub fn set_state(&mut self, state: ThreadState) {
         self.state = state;
+    }
+
+    pub fn is_runnable(&self) -> bool {
+        if let ThreadState::Running = self.state {
+            true
+        } else {
+            false
+        }
     }
 
     /// Gets the ID of this thread.
@@ -223,23 +265,14 @@ impl<'a, M: VirtualMemory> super::Syscall<'a, M> {
         // `esp`, then the start routine is called (and the return address is
         // pushed).
         // TODO: Verify that this is what the real kernel does
-        let mut esp = stack_start + *stack_size;
-        esp -= 4;
-        self.mem.store_u32(esp, ctx2.raw_addr())?;
-        esp -= 4;
-        self.mem.store_u32(esp, ctx1.raw_addr())?;
-        let ebp = esp;
-        // Return address (FIXME we don't really have one)
-        esp -= 4;
-        self.mem.store_u32(esp, !0)?;
-
         let mut thread = Thread::new(start_routine.raw_addr(), stack_start, *stack_size);
-        {
-            // Adjust esp and set ebp
-            let state = thread.saved_state_mut();
-            state.set_esp(esp);
-            state.set_ebp(ebp);
-        }
+        super::push(thread.saved_state_mut(), self.mem, ctx2.raw_addr())?;
+        super::push(thread.saved_state_mut(), self.mem, ctx1.raw_addr())?;
+        let ebp = thread.saved_state.esp();
+        // Return address
+        super::push(thread.saved_state_mut(), self.mem, super::THREAD_EXIT_SENTINEL)?;
+        thread.saved_state_mut().set_ebp(ebp);
+
         if *create_suspended {
             thread.set_state(ThreadState::Suspended);
         }
@@ -249,13 +282,18 @@ impl<'a, M: VirtualMemory> super::Syscall<'a, M> {
         let id = self.kernel.objects.get::<Thread>(&handle).unwrap().id();
 
         // Write back ID and handle
-        trace!("handle {:?} -> {:?}", handle, thread_handle);
         self.mem.store_u32(thread_handle.raw_addr(), handle.raw_addr())?;
         if thread_id.raw_addr() != 0 {
             self.mem.store_u32(thread_id.raw_addr(), id)?;
         }
 
         Ok(())
+    }
+
+    pub fn PsTerminateSystemThread(&mut self, (exit_status,): (u32,)) {
+        info!("thread #{} terminating with code {} ({:?})", self.kernel.ps.current_thread, exit_status, NtStatus::from_u32(exit_status));
+
+        self.kernel.terminate_current_thread();
     }
 }
 

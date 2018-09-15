@@ -44,7 +44,7 @@ fn run() -> Result<(), Box<Error>> {
     let mut mem = MmapMemory::new();
     let kernel = Kernel::load(&xbe, &mut mem)?;
 
-    let initial_state = kernel.current_thread_state();
+    let initial_state = kernel.current_thread_state().expect("no thread set");
     let mut interpreter = Interpreter::new(mem, initial_state, kernel);
 
     interpreter.set_tracer(|interp: &mut Interpreter<_, _>, eip, _instr: &_| {

@@ -3,8 +3,6 @@
 use memory::VirtualMemory;
 use kernel::types::*;
 
-use num_traits::FromPrimitive;
-
 #[allow(non_snake_case)]
 impl<'a, M: VirtualMemory> super::Syscall<'a, M> {
     /// Converts an `NTSTATUS` code to the corresponding system error code.

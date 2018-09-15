@@ -124,13 +124,16 @@ pub enum Object {
 }
 
 impl Object {
-    /// The last handle to the object was closed, destroy it.
+    /// Free all resources occupied by the object.
+    ///
+    /// Called when the last handle to the object is closed.
     pub fn destroy(self, _kernel: &mut super::Kernel) {
         match self {
             Object::Thread(_) => {
-                // we don't have to do anything for threads since they can only
+                // We don't have to do anything for threads since they can only
                 // be destroyed via `PsTerminateSystemThread` which does
                 // everything it needs to.
+                // Maybe we'll use this to send an exit notification later.
             }
             Object::Dummy => {}
         }

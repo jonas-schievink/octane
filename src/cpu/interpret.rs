@@ -59,10 +59,30 @@ pub trait Hooks: Sized {
         let _ = (interp, eip, target);
         Ok(HookAction::Continue)
     }
+
+    /// `ret` instruction.
+    ///
+    /// This is called after the stack pointer has been adjusted according to
+    /// the `ret` instruction's parameters.
+    ///
+    /// If this returns `HookAction::Nop`, `eip` will not be changed.
+    ///
+    /// # Parameters
+    ///
+    /// * `interp`: The interpreter.
+    /// * `target`: The return address to jump to.
+    fn ret<M: VirtualMemory>(
+        &mut self,
+        interp: &mut Interpreter<Self, M>,
+        target: u32,
+    ) -> Result<HookAction, HookError> {
+        let _ = (interp, target);
+        Ok(HookAction::Continue)
+    }
 }
 
 /// Determines how the interpreter should proceed after calling a hook.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HookAction {
     /// Continue executing the instruction as if the hook wasn't there.
     Continue,
@@ -72,6 +92,8 @@ pub enum HookAction {
     /// Note that operands will still be loaded from memory before the hook
     /// itself is called, so any side effects from that will still happen.
     Nop,
+    /// Exit the interpreter without executing further instructions.
+    Exit,
 }
 
 /// An error returned by an interpreter hook.
@@ -104,6 +126,7 @@ pub struct Interpreter<'t, H: Hooks, M: VirtualMemory> {
     pub state: State,
     /// Virtual memory.
     pub mem: M,
+    stopped: bool,
     hooks: Option<Box<H>>,
     tracer: Option<NoDebug<Box<Trace<H, M> + 't>>>,
 }
@@ -120,6 +143,7 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
         Self {
             state,
             mem,
+            stopped: false,
             hooks: Some(Box::new(hooks)),
             tracer: None,
         }
@@ -148,8 +172,16 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
     }
     // TODO remove accessors
 
+    pub fn is_stopped(&self) -> bool {
+        self.stopped
+    }
+
     /// Fetch, decode and execute the next instruction.
     pub fn step(&mut self) -> Result<(), InterpreterError> {
+        if self.stopped {
+            return Err(InterpreterError::Stopped);
+        }
+
         // fetch and decode next instruction
         let (instr, new_eip) = {
             let mut decoder = Decoder::new(&self.mem, self.state.eip());
@@ -279,7 +311,7 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
                         self.push(eip.into())?;
                         self.state.set_eip(target);
                     }
-                    HookAction::Nop => {}
+                    HookAction::Nop | HookAction::Exit => {}
                 }
             }
             Ret { pop } => {
@@ -287,8 +319,16 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
                 let return_addr = self.mem.load_i32(esp)? as u32;
                 let new_esp = esp + 4 + u32::from(*pop);
                 self.state.set_esp(new_esp);
-                self.state.set_eip(return_addr);
-                trace!("ret: esp={:#010X}, return={:#010X}, new esp={:#010X}", esp, return_addr, new_esp);
+
+                match self.with_hooks(|interp, hooks| hooks.ret(interp, return_addr))? {
+                    HookAction::Continue => {
+                        self.state.set_eip(return_addr);
+                        trace!("ret: esp={:#010X}, return={:#010X}, new esp={:#010X}", esp, return_addr, new_esp);
+                    }
+                    HookAction::Nop | HookAction::Exit => {
+                        trace!("hook prevented return");
+                    }
+                }
             }
             Push { operand } => {   // FIXME <- bug in here
                 let value = self.eval_operand(operand)?;
@@ -608,11 +648,18 @@ impl<'t, H: Hooks, M: VirtualMemory> Interpreter<'t, H, M> {
         }
     }
 
-    fn with_hooks<F, R>(&mut self, f: F) -> R
-    where F: FnOnce(&mut Self, &mut H) -> R {
+    fn with_hooks<F>(&mut self, f: F) -> Result<HookAction, HookError>
+    where F: FnOnce(&mut Self, &mut H) -> Result<HookAction, HookError> {
         let mut hooks = self.hooks.take().expect("hooks appear to have gone for a walk");
         let result = f(self, &mut hooks);
         self.hooks = Some(hooks);
+
+        if let Ok(HookAction::Exit) = result {
+            // Set the stop flag, but rely on the interpreter impl to not do
+            // anything.
+            self.stopped = true;
+        }
+
         result
     }
 }
@@ -703,6 +750,8 @@ pub enum InterpreterError {
     DivisionException,
     /// An `int3` was hit.
     Breakpoint,
+    /// Attempted to use a stopped interpreter.
+    Stopped,
 }
 
 impl From<DecoderError> for InterpreterError {
@@ -731,6 +780,7 @@ impl fmt::Display for InterpreterError {
             InterpreterError::Hook(err) => err.fmt(f),
             InterpreterError::DivisionException => write!(f, "division exception"),
             InterpreterError::Breakpoint => write!(f, "hit breakpoint"),
+            InterpreterError::Stopped => write!(f, "interpreter has exited"),
         }
     }
 }
