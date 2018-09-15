@@ -135,12 +135,6 @@ impl Kernel {
     }
 
     fn setup_main_thread<M: VirtualMemory>(&mut self, xbe: &Xbe, mem: &mut M) {
-        // FIXME BUG! The thread doesn't start execution at the entry point, it
-        // starts at a kernel shim that the program can (and will!) return to.
-        // The shim then exits the thread.
-        // This is the bug I'm currently facing - the thread underflows its
-        // stack and runs off to 0x00000000.
-
         let entry = xbe.entry_point();
 
         let stack_size = 1024 * 64; // FIXME is this configurable?

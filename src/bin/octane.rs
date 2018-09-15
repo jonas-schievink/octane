@@ -39,7 +39,7 @@ fn run() -> Result<(), Box<Error>> {
 
     let contents = fs::read(&opt.path)?;
     let xbe = Xbe::parse(&contents)?;
-    eprintln!("opened '{}'", xbe.title_name());
+    eprintln!("Opened '{}'", xbe.title_name());
 
     let mut mem = MmapMemory::new();
     let kernel = Kernel::load(&xbe, &mut mem)?;
