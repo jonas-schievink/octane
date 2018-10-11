@@ -44,12 +44,11 @@ by the emulator):
 ```
     Address range     |   Size   |
 ----------------------+----------+---------------------------------------
-0x00000000-0x10000000 | 256 MiB  | RAM
-                      |          | Retail Xbox only has 64 MiB
+0x00000000-0x04000000 | 64 MiB/  | RAM
+          -0x08000000 | 128 MiB  | Retail Xbox has 64 MiB
                       |          | Dev kits have 128 MiB
-                      |          | (rest is apparently just unused)
 ----------------------+----------+---------------------------------------
-0xFF000000-0xFFFFFFFF | 16 MiB   | Flash
+0xFF000000-0xFFFFFFFF | 16 MiB   | Flash containing the BIOS
                       |          | (the Flash ROM is 256 KiB or 1 MiB
                       |          | and is repeated throughout this area)
 ----------------------+----------+---------------------------------------
