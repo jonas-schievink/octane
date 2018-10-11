@@ -36,10 +36,41 @@ Xbox.
 
 ## Internals
 
-### Memory map
+### Physical memory map
 
-Here's the virtual memory map as seen by the running program. Most kernel data
-structures are stored in host memory and are invisible to the program.
+The following is the physical memory map used by the console (to be implemented
+by the emulator):
+
+```
+    Address range     |   Size   |
+----------------------+----------+---------------------------------------
+0x00000000-0x10000000 | 256 MiB  | RAM
+                      |          | Retail Xbox only has 64 MiB
+                      |          | Dev kits have 128 MiB
+                      |          | (rest is apparently just unused)
+----------------------+----------+---------------------------------------
+0xFF000000-0xFFFFFFFF | 16 MiB   | Flash
+                      |          | (the Flash ROM is 256 KiB or 1 MiB
+                      |          | and is repeated throughout this area)
+----------------------+----------+---------------------------------------
+0xFD000000-0xFDFFFFFF | 16 MiB   | GPU control registers
+----------------------+----------+---------------------------------------
+```
+
+Sources:
+[http://xboxdevwiki.net/Boot_Process#Paging](http://xboxdevwiki.net/Boot_Process#Paging)
+(lists the virtual memory setup created by the bootloader),
+[http://xboxdevwiki.net/BIOS](http://xboxdevwiki.net/BIOS),
+[http://xboxdevwiki.net/Flash_ROM](http://xboxdevwiki.net/Flash_ROM).
+
+FIXME: Information in the "Flash ROM" and "BIOS" wiki pages contradict, figure
+out which one is right (currently trusting the "BIOS" page).
+
+### Virtual memory map (Emulator) 
+
+Here's the virtual memory map that is currently created by the emulator (as seen
+by the running program). Most kernel data structures are stored in host memory
+and are invisible to the program.
 
 An explanation of the objects follows below.
 
